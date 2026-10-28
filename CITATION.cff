@@ -1,0 +1,50 @@
+# Copyright © 2026 The Trustees of Indiana University and contributors.
+# This work is licensed under the Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0).
+# You may use, share, and adapt this work for non-commercial purposes, subject to the terms of the license and appropriate attribution.
+# See the LICENSE file in the root of this repository for the full license terms.
+# https://creativecommons.org/licenses/by-nc/4.0/
+
+cff-version: 1.2.0
+message: If you use this software, please cite it using these metadata.
+title: "SimSoM NGen"
+abstract: "The Simulator of Social Media, the Next Generation, applies agent-based modeling techniques to model an online information ecosystem, in particular to simulate the diffusion of, and exposure to, content by social media users."
+version: 1
+url: https://github.com/osome-iu/simsom-ngen
+license: CC-BY-NC-4.0
+authors:
+- family-names: Beverton
+  given-names: Sarah
+  website: https://github.com/sarahbeverton
+- family-names: Ghosh
+  given-names: Shalmoli
+  website: https://github.com/shalmolighosh
+- family-names: Giordano
+  given-names: Silvia
+  website: https://github.com/SilviaGiordano
+- family-names: Kim
+  given-names: Sangyeon
+  website: https://github.com/clearingkim
+- family-names: Liu
+  given-names: Nick
+  website: https://github.com/nick-c-liu
+- family-names: Menczer
+  given-names: Fil
+  website: https://github.com/filmenczer
+- family-names: Nogara
+  given-names: Gianluca
+  website: https://github.com/gi-ux
+- family-names: Serrette
+  given-names: Ben
+  website: https://github.com/benserrette
+- family-names: Tran Truong
+  given-names: Bao
+  website: https://github.com/btrantruong
+- family-names: Verdolotti
+  given-names: Enrico
+  website: https://github.com/3rr4t1c
+- family-names: Yin
+  given-names: Lake
+  website: https://github.com/LakeYin
+
+
+

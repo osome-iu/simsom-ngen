@@ -1,0 +1,97 @@
+-- Copyright © 2026 The Trustees of Indiana University and contributors.
+-- This work is licensed under the Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0).
+-- You may use, share, and adapt this work for non-commercial purposes, subject to the terms of the license and appropriate attribution.
+-- See the LICENSE file in the root of this repository for the full license terms.
+-- https://creativecommons.org/licenses/by-nc/4.0/
+
+CREATE EXTENSION benchmark_clock;
+
+SELECT distribution
+FROM benchmark_clock_configure_fixed_step(
+    p_fixed_step => 1,
+    p_start_action_id => 0,
+    p_start_tick_ms => 0
+);
+
+CREATE TEMP TABLE benchmark_clock_fixed_rows (
+    action_id bigint NOT NULL,
+    timestamp bigint NOT NULL,
+    payload bigint NOT NULL
+);
+
+CREATE TRIGGER benchmark_clock_fill_action_fields
+BEFORE INSERT ON benchmark_clock_fixed_rows
+FOR EACH ROW
+EXECUTE FUNCTION benchmark_clock_assign_action_fields();
+
+INSERT INTO benchmark_clock_fixed_rows (payload)
+SELECT 0::bigint
+FROM generate_series(1, 5);
+
+SELECT bool_and(action_id = timestamp) FROM benchmark_clock_fixed_rows;
+
+SELECT bool_and(prev_action_id IS NULL OR action_id = prev_action_id + 1)
+FROM (
+    SELECT
+        action_id,
+        lag(action_id) OVER (ORDER BY action_id) AS prev_action_id
+    FROM benchmark_clock_fixed_rows
+) AS ordered_rows;
+
+SELECT benchmark_clock_current_action_id() = 5;
+SELECT benchmark_clock_current_tick_ms() = 5;
+
+SELECT round(
+    benchmark_clock_exponential_lambda(
+        10000,
+        9.586385781407468e-08,
+        3.907543315063294e-05
+    )::numeric,
+    12
+);
+
+SELECT lambda > 0
+FROM benchmark_clock_configure_exponential(
+    p_num_users => 10000,
+    p_start_action_id => 0,
+    p_start_tick_ms => 0
+);
+
+CREATE TEMP TABLE benchmark_clock_exponential_rows (
+    action_id bigint NOT NULL,
+    timestamp bigint NOT NULL,
+    payload bigint NOT NULL
+);
+
+CREATE TRIGGER benchmark_clock_fill_action_fields_exp
+BEFORE INSERT ON benchmark_clock_exponential_rows
+FOR EACH ROW
+EXECUTE FUNCTION benchmark_clock_assign_action_fields();
+
+INSERT INTO benchmark_clock_exponential_rows (payload)
+SELECT 0::bigint
+FROM generate_series(1, 25);
+
+SELECT bool_and(prev_action_id IS NULL OR action_id = prev_action_id + 1)
+FROM (
+    SELECT
+        action_id,
+        lag(action_id) OVER (ORDER BY action_id) AS prev_action_id
+    FROM benchmark_clock_exponential_rows
+) AS ordered_rows;
+
+SELECT bool_and(prev_timestamp IS NULL OR timestamp > prev_timestamp)
+FROM (
+    SELECT
+        timestamp,
+        lag(timestamp) OVER (ORDER BY action_id) AS prev_timestamp
+    FROM benchmark_clock_exponential_rows
+) AS ordered_rows;
+
+SELECT min(delta_ms) >= 1
+FROM (
+    SELECT
+        (timestamp - lag(timestamp) OVER (ORDER BY action_id)) AS delta_ms
+    FROM benchmark_clock_exponential_rows
+) AS deltas
+WHERE delta_ms IS NOT NULL;

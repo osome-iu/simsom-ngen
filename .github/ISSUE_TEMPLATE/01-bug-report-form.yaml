@@ -1,0 +1,57 @@
+# Copyright © 2026 The Trustees of Indiana University and contributors.
+# This work is licensed under the Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0).
+# You may use, share, and adapt this work for non-commercial purposes, subject to the terms of the license and appropriate attribution.
+# See the LICENSE file in the root of this repository for the full license terms.
+# https://creativecommons.org/licenses/by-nc/4.0/
+
+name: Bug Report Form
+description: Report a bug or issue that needs to be fixed
+labels: ['bug']
+type: 'Bug'
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: Describe the bug
+    validations:
+      required: true
+  - type: textarea
+    id: closed
+    attributes:
+      label: Closed When
+      description: How do we know this issue can be closed?
+      value: | 
+        - [ ] We are confident that this bug has been fixed permanently.
+        - [ ] Summary and Retrospective completed.
+  - type: textarea
+    id: solution
+    attributes:
+      label: Possible Solution
+      description: Thoughts on how you might fix this?
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional Information
+      description: Any thing else that might be relevant? Environment info?  Screenshots? Bug report emails?
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce the bug?
+      placeholder: |
+        1.
+        2.
+        3.
+        ...
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What's it supposed to do?
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What does it actually do?
+

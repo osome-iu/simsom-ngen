@@ -1,0 +1,124 @@
+<!--
+Copyright © 2026 The Trustees of Indiana University and contributors.
+This work is licensed under the Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0).
+You may use, share, and adapt this work for non-commercial purposes, subject to the terms of the license and appropriate attribution.
+See the LICENSE file in the root of this repository for the full license terms.
+https://creativecommons.org/licenses/by-nc/4.0/
+-->
+
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36" version="29.3.6">
+  <diagram name="UserFeedBehaviorERD" id="0">
+    <mxGraphModel dx="1395" dy="951" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="User Object" vertex="1">
+          <mxGeometry height="80" width="180" x="310" y="440" as="geometry" />
+        </mxCell>
+        <mxCell id="3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="User Behavior Model" vertex="1">
+          <mxGeometry height="80" width="180" x="440" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-45" edge="1" parent="1" source="4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;curved=1;dashed=1;dashPattern=8 8;" target="8">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="660" y="450" />
+              <mxPoint x="660" y="360" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Feed Item" vertex="1">
+          <mxGeometry height="80" width="180" x="680" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-29" edge="1" parent="1" source="5" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-31" connectable="0" parent="ff0aRX6ltB7SeZc3pNSL-29" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="Lurking" vertex="1">
+          <mxGeometry relative="1" x="-0.059" as="geometry">
+            <mxPoint x="-1" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="5" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Lurking Probablity" vertex="1">
+          <mxGeometry height="80" width="180" x="950" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-36" edge="1" parent="1" source="6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1040" y="220" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-43" connectable="0" parent="ff0aRX6ltB7SeZc3pNSL-36" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="Select the one with highest prob." vertex="1">
+          <mxGeometry relative="1" x="0.0286" y="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="6" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Action Type Probability" vertex="1">
+          <mxGeometry height="80" width="180" x="950" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-34" edge="1" parent="1" source="8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;curved=1;" target="3">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="770" y="230" />
+              <mxPoint x="530" y="230" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-35" connectable="0" parent="ff0aRX6ltB7SeZc3pNSL-34" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="Stop" vertex="1">
+          <mxGeometry relative="1" x="0.0412" y="-2" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="8" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Scroll Behavior" vertex="1">
+          <mxGeometry height="80" width="180" x="680" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="20" edge="1" parent="1" source="2" style="endArrow=block;html=1;" target="3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="22" edge="1" parent="1" source="4" style="endArrow=block;html=1;" target="5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="23" edge="1" parent="1" source="5" style="endArrow=block;html=1;" target="6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-32" connectable="0" parent="23" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="Not Lurking" vertex="1">
+          <mxGeometry relative="1" x="0.125" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="25" edge="1" parent="1" source="3" style="endArrow=block;html=1;" target="8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="26" edge="1" parent="1" source="8" style="endArrow=block;html=1;" target="4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-33" connectable="0" parent="26" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="Continue" vertex="1">
+          <mxGeometry relative="1" x="0.0667" y="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-27" edge="1" parent="1" source="ff0aRX6ltB7SeZc3pNSL-26" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-26" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Feed" vertex="1">
+          <mxGeometry height="80" width="180" x="310" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-46" edge="1" parent="1" source="ff0aRX6ltB7SeZc3pNSL-37" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0.75;entryY=0;entryDx=0;entryDy=0;curved=1;dashed=1;dashPattern=8 8;" target="8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-37" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Post/Reply/Repost/Quote" vertex="1">
+          <mxGeometry height="80" width="180" x="950" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-47" edge="1" parent="1" style="endArrow=none;dashed=1;html=1;dashPattern=8 8;strokeWidth=2;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="668.5" y="120" as="sourcePoint" />
+            <mxPoint x="841.5" y="120" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-48" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Both Feed Item and Action might contribute to Scroll Behavior" vertex="1">
+          <mxGeometry height="50" width="210" x="650" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ff0aRX6ltB7SeZc3pNSL-50" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#00CC00;strokeWidth=5;" value="" vertex="1">
+          <mxGeometry height="90" width="240" x="640" y="90" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

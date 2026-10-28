@@ -1,0 +1,45 @@
+# Copyright © 2026 The Trustees of Indiana University and contributors.
+# This work is licensed under the Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0).
+# You may use, share, and adapt this work for non-commercial purposes, subject to the terms of the license and appropriate attribution.
+# See the LICENSE file in the root of this repository for the full license terms.
+# https://creativecommons.org/licenses/by-nc/4.0/
+
+services:
+  database:
+    build:
+      context: .
+      dockerfile: docker/postgres.Dockerfile
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: simsom
+      POSTGRES_PASSWORD: simsom
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=simsom --dbname=postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+    volumes:
+      # PostgreSQL 18 keeps its versioned PGDATA directory below this path.
+      - postgres18-data:/var/lib/postgresql
+
+  simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      # The default simulator config uses database name "postgres". libpq
+      # fills in the network connection details from these variables.
+      PGHOST: database
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      PGUSER: simsom
+      PGPASSWORD: simsom
+    volumes:
+      - ./output:/output/output
+
+volumes:
+  postgres18-data:
