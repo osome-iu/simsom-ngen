@@ -954,6 +954,7 @@ class DefaultSetupDbPlanner:
             runtime_count=0, runtime_keywords=("source_user_type", "users_by_type", "state", "progress"),
         )
         source_user_count = len(users_by_type.get(source_user_type, []))
+        total_network_users = sum(len(user_ids) for user_ids in users_by_type.values())
         phase_start_edge_count = state.total_edges
         if self.setup_progress is not None:
             self.setup_progress.begin(
@@ -962,6 +963,7 @@ class DefaultSetupDbPlanner:
                 progress_unit="source_users",
                 phase=phase,
                 user_type=source_user_type,
+                network_total_users=total_network_users,
                 function=function_name,
                 phase_edges=0,
                 total_edges=state.total_edges,
