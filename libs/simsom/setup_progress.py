@@ -144,6 +144,15 @@ class SetupProgressReporter:
             if whole_percent != self._last_progress_percent:
                 publish = "progress"
                 self._last_progress_percent = whole_percent
+                if self.logger is not None:
+                    self.logger.info(
+                        "%s",
+                        json.dumps(
+                            {"event": "setup_progress", **self._state},
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        ),
+                    )
         self._send(publish)
 
     def complete(self, **details: Any) -> None:

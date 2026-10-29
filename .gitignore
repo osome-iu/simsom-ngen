@@ -183,6 +183,9 @@ Temporary Items
 # Test dir
 /libs/simsom/files
 
+# Node.js dependencies and generated frontend caches
+node_modules/
+
 # Data dirs
 data/
 
