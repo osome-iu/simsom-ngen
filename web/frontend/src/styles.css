@@ -42,7 +42,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .hero h1 span { color: #93a3b4; }
 .hero-description { max-width: 760px; margin: 16px 0 0; color: #aab5c0; font-size: clamp(0.95rem, 1.3vw, 1.08rem); line-height: 1.6; }
 .launch-card { min-height: 0; padding: 24px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 0.35fr); gap: 14px; border: 1px solid rgba(86, 180, 233, 0.17); border-radius: 20px; background: linear-gradient(150deg, rgba(27, 43, 55, 0.95), rgba(14, 22, 36, 0.96)); box-shadow: 0 28px 70px rgba(0, 0, 0, 0.28); }
-.launch-card > div:first-child { display: flex; align-items: baseline; gap: 12px; }
+.launch-card > div:first-child { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .launch-card > div:first-child .card-kicker { margin: 0; }
 .launch-card > div:first-child, .launch-card > .basic-config, .launch-note { grid-column: 1 / -1; }
 .launch-card h2 { margin: 0; font-size: 1.2rem; letter-spacing: -0.025em; }

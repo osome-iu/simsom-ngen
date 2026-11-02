@@ -63,7 +63,7 @@ The first version should display a small set of understandable results.
 - Total number of users.
 - Total number of actions.
 - Average number of actions per user.
-- Average content or action quality.
+- Average content quality.
 - Whether the simulation converged and why it stopped.
 - Basic policy coverage and intervention statistics.
 

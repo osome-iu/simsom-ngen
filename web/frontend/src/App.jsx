@@ -335,7 +335,7 @@ function App() {
                 timestamp={results.currentSimulatorTimestampMs ?? latest?.simulatorTimestampMs}
                 isRunning={isRunning}
               />
-              <Panel className="quality-timeline-panel" title="Average action quality timeline">
+              <Panel className="quality-timeline-panel" title="Average content quality timeline">
                 <QualityTimeline series={series} />
                 <div className="convergence-row">
                   <span className={`convergence-mark ${latest?.converged ? "is-converged" : ""}`} />
@@ -356,7 +356,7 @@ function App() {
               </summary>
               <div className="additional-analytics-grid">
                 <Panel kicker="Model signals" title="Quality & policy">
-                  <SignalRow label="Average action quality" value={latest?.avgActionQuality} />
+                  <SignalRow label="Average content quality" value={latest?.avgActionQuality} />
                   <SignalRow label="Policy coverage" value={policy.policy_coverage} />
                   <SignalRow label="Intervention ratio" value={policy.policy_intervention_ratio} />
                 </Panel>
@@ -488,7 +488,7 @@ function BasicRunConfig({ config, disabled, onChange, onCriterionChange }) {
           <div className="basic-stopping-option">
             <Toggle
               label="Stop on convergence"
-              description="Stop when average action quality stabilizes."
+              description="Stop when average content quality stabilizes."
               checked={Boolean(qualityEma)}
               onChange={(checked) => onCriterionChange("exponential_moving_average_action_quality", checked)}
               disabled={disabled || (Boolean(qualityEma) && !maxActions)}
@@ -724,10 +724,10 @@ function NetworkVisualization({ graph, loading, setup, runStatus, avgActionsPerU
           {loading && <em>Refreshing…</em>}
         </div>
         <div className="network-meta-stats">
-          <div><strong>{number(meta.userCount)}</strong><span>{isFiltered ? "total users / nodes" : "users / nodes"}</span></div>
-          {isFiltered && <div><strong>{number(meta.returnedNodeCount)}</strong><span>shown users / nodes</span></div>}
-          <div><strong>{number(meta.interactionCount)}</strong><span>{isFiltered ? "total interactions / edges" : "interactions / edges"}</span></div>
-          {isFiltered && <div><strong>{number(meta.returnedEdgeCount)}</strong><span>shown interactions / edges</span></div>}
+          <div><strong>{number(meta.userCount)}</strong><span>{isFiltered ? "total users" : "users"}</span></div>
+          {isFiltered && <div><strong>{number(meta.returnedNodeCount)}</strong><span>shown users</span></div>}
+          <div><strong>{number(meta.interactionCount)}</strong><span>{isFiltered ? "total interactions" : "interactions"}</span></div>
+          {isFiltered && <div><strong>{number(meta.returnedEdgeCount)}</strong><span>shown interactions</span></div>}
           <div><strong>{number(avgActionsPerUser, 2)}</strong><span>avg. actions / user</span></div>
           <div><strong>{number(meta.originalPostCount)}</strong><span>original posts</span></div>
         </div>
@@ -1022,9 +1022,9 @@ function QualityTimeline({ series }) {
     <div className="quality-timeline">
       <div className="chart-summary">
         <strong>{number(values.at(-1), 3)}</strong>
-        <span>Average action quality</span>
+        <span>Average content quality</span>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Average action quality over simulated time">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Average content quality over simulated time">
         <defs>
           <linearGradient id="qualityAreaFill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#0072b2" stopOpacity="0.3" />
@@ -1046,7 +1046,7 @@ function QualityTimeline({ series }) {
             key={index}
             className="quality-point"
             role="img"
-            aria-label={`${simulatedTime(simulatedTimestamp)}, average quality ${number(value, 3)}`}
+            aria-label={`${simulatedTime(simulatedTimestamp)}, average content quality ${number(value, 3)}`}
             tabIndex="0"
             onMouseEnter={() => setHoveredPointIndex(index)}
             onMouseLeave={() => setHoveredPointIndex(null)}
@@ -1061,7 +1061,7 @@ function QualityTimeline({ series }) {
           <g className="quality-tooltip" pointerEvents="none">
             <rect x={tooltipX} y={tooltipY} width={tooltipWidth} height={tooltipHeight} rx="8" />
             <text x={tooltipX + 16} y={tooltipY + 32}>Simulated time: {simulatedTime(hoveredPoint.simulatedTimestamp)}</text>
-            <text x={tooltipX + 16} y={tooltipY + 66}>Average action quality: {number(hoveredPoint.value, 3)}</text>
+            <text x={tooltipX + 16} y={tooltipY + 66}>Average content quality: {number(hoveredPoint.value, 3)}</text>
           </g>
         )}
       </svg>
