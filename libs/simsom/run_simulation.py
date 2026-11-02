@@ -180,8 +180,14 @@ def _print_run_status(message: str, *, leading_blank: bool = True) -> None:
 
 
 def _run_mpi_command(command: list[str]) -> int:
-    """Run MPI in an isolated process group and return its exit code."""
-    process = subprocess.Popen(command, start_new_session=True)
+    """Run MPI in the appropriate process group and return its exit code."""
+    # The web API already owns an isolated process group around this runner.
+    # Keep MPI in that group so a web stop request reaches the whole tree.
+    inherit_process_group = os.environ.get("SIMSOM_INHERIT_MPI_PROCESS_GROUP") == "1"
+    process = subprocess.Popen(
+        command,
+        start_new_session=not inherit_process_group,
+    )
     try:
         return process.wait()
     except KeyboardInterrupt:

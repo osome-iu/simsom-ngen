@@ -25,4 +25,5 @@ node_modules
 analyses
 docs
 tests
-web
+web/frontend/dist
+web/frontend/node_modules

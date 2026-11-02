@@ -68,8 +68,8 @@ supports that algorithm.
 - `analytics_summary`
   - Stores lightweight checks produced at configured simulation-progress
     checkpoints and the final full report.
-  - Holds aggregate counts, average activity, average action quality,
-    termination criteria, policy statistics, network averages, and
+  - Holds aggregate counts, the simulator timestamp, average activity, average
+    action quality, termination criteria, policy statistics, network averages, and
     analyzer-specific properties.
   - The final row stores final analytics-function results at
     `other_properties.analytics_outputs`.

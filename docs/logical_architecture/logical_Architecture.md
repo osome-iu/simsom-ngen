@@ -264,8 +264,9 @@ The shared domain/activity semantics are documented in
 - `analytics_summary`
   - One lightweight status row for each recurring check and one full report
     after termination.
-  - Stores counts, average activity, average action quality, termination
-    criteria, and analyzer-specific properties on the final report.
+  - Stores counts, the simulator timestamp, average activity, average action
+    quality, termination criteria, and analyzer-specific properties on the final
+    report.
 ### Shared Indexes
 
 - `user_activity_level_idx` on `user(activity_level)`.

@@ -326,6 +326,7 @@ class AnalyticsPostgresIntegrationTests(unittest.TestCase):
             AnalyticsSummaryRecord(
                 user_count=2,
                 action_count=4,
+                simulator_timestamp_ms=3_600_000,
                 avg_activity_level=2.0,
                 avg_action_quality=0.65,
                 termination_criteria=[
@@ -344,6 +345,7 @@ class AnalyticsPostgresIntegrationTests(unittest.TestCase):
             SELECT json_build_object(
                 'user_count', user_count,
                 'action_count', action_count,
+                'simulator_timestamp_ms', simulator_timestamp_ms,
                 'avg_activity_level', avg_activity_level,
                 'avg_action_quality', avg_action_quality,
                 'termination_criteria', termination_criteria,
@@ -357,6 +359,7 @@ class AnalyticsPostgresIntegrationTests(unittest.TestCase):
 
         self.assertEqual(row["user_count"], 2)
         self.assertEqual(row["action_count"], 4)
+        self.assertEqual(row["simulator_timestamp_ms"], 3_600_000)
         self.assertAlmostEqual(row["avg_activity_level"], 2.0)
         self.assertAlmostEqual(row["avg_action_quality"], 0.65)
         self.assertEqual(

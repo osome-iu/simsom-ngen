@@ -88,11 +88,14 @@ class SetupProgressReporterTests(unittest.TestCase):
             [record["sequence"] for record in records],
             list(range(1, len(records) + 1)),
         )
-        self.assertEqual(len(stage_events), 1)
+        self.assertEqual(len(stage_events), 2)
         self.assertEqual(stage_events[0]["event"], "setup_stage_started")
         self.assertEqual(stage_events[0]["stage"], "network_generation")
         self.assertEqual(stage_events[0]["phase"], "within_type_networking")
         self.assertFalse(Path(stage_events[0]["setup_status_file"]).is_absolute())
+        self.assertEqual(stage_events[1]["event"], "setup_progress")
+        self.assertEqual(stage_events[1]["progress_current"], 5)
+        self.assertEqual(stage_events[1]["progress_percent"], 50)
 
     def test_failure_preserves_the_current_stage(self):
         with tempfile.TemporaryDirectory() as temp_dir:

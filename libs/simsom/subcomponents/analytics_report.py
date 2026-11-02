@@ -22,6 +22,7 @@ class AnalyticsMetrics:
 
     user_count: int = 0
     action_count: int = 0
+    simulator_timestamp_ms: int = 0
     avg_activity_level: float | None = None
     avg_action_quality: float | None = None
     other_properties: dict[str, Any] = field(default_factory=dict)
@@ -29,6 +30,10 @@ class AnalyticsMetrics:
     def __post_init__(self) -> None:
         _require_non_negative_int("user_count", self.user_count)
         _require_non_negative_int("action_count", self.action_count)
+        _require_non_negative_int(
+            "simulator_timestamp_ms",
+            self.simulator_timestamp_ms,
+        )
         _require_optional_non_negative_number("avg_activity_level", self.avg_activity_level)
         _require_optional_unit_interval("avg_action_quality", self.avg_action_quality)
         _require_dict("other_properties", self.other_properties)

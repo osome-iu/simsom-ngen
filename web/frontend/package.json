@@ -1,0 +1,22 @@
+{
+  "name": "simsom-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "6.0.5",
+    "helios-network": "^0.10.3",
+    "helios-web": "^0.10.9",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "vite": "8.2.1"
+  },
+  "devDependencies": {
+    "yarn": "^1.22.22"
+  }
+}

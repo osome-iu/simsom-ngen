@@ -419,6 +419,7 @@ class AnalyticsBoundaryTests(unittest.TestCase):
             AnalyticsMetrics(
                 user_count=1,
                 action_count=4,
+                simulator_timestamp_ms=3_600_000,
                 avg_action_quality=1.0,
             )
         )
@@ -432,6 +433,7 @@ class AnalyticsBoundaryTests(unittest.TestCase):
         )
         self.assertTrue(all(criterion.met for criterion in report.termination_criteria))
         summary = to_analytics_summary_record(report)
+        self.assertEqual(summary.simulator_timestamp_ms, 3_600_000)
         self.assertEqual(
             [criterion["function_name"] for criterion in summary.termination_criteria],
                 [
@@ -447,6 +449,9 @@ class AnalyticsBoundaryTests(unittest.TestCase):
 
         with self.assertRaisesRegex(TypeError, "action_count"):
             AnalyticsMetrics(action_count=True)
+
+        with self.assertRaisesRegex(ValueError, "simulator_timestamp_ms"):
+            AnalyticsMetrics(simulator_timestamp_ms=-1)
 
         with self.assertRaisesRegex(ValueError, "avg_action_quality"):
             AnalyticsMetrics(avg_action_quality=1.1)
@@ -469,6 +474,9 @@ class AnalyticsBoundaryTests(unittest.TestCase):
         """Analytics DB records should reject invalid persisted status values."""
         with self.assertRaisesRegex(ValueError, "avg_action_quality"):
             AnalyticsSummaryRecord(avg_action_quality=1.2)
+
+        with self.assertRaisesRegex(ValueError, "simulator_timestamp_ms"):
+            AnalyticsSummaryRecord(simulator_timestamp_ms=-1)
 
         with self.assertRaisesRegex(TypeError, "termination_criteria"):
             AnalyticsSummaryRecord(termination_criteria="yes")

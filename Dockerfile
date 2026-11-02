@@ -20,6 +20,12 @@ COPY requirements.runtime.txt /tmp/requirements.runtime.txt
 RUN pip install --no-cache-dir --no-binary=mpi4py -r /tmp/requirements.runtime.txt
 
 
+FROM python-builder AS web-python-builder
+
+COPY requirements.web.txt /tmp/requirements.web.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.web.txt
+
+
 FROM python:3.12-slim-bookworm AS simulator
 
 COPY --from=postgres-client-source \
@@ -45,3 +51,14 @@ ENV PATH="/opt/venv/bin:${PATH}" \
 WORKDIR /output
 
 ENTRYPOINT ["python", "/app/libs/simsom/run_simulation.py"]
+
+
+FROM simulator AS web-api
+
+COPY --from=web-python-builder /opt/venv /opt/venv
+COPY web /app/web
+
+WORKDIR /app
+
+ENTRYPOINT ["python", "-m", "web.api_server"]
+CMD ["--host", "0.0.0.0", "--port", "8000"]
