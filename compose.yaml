@@ -26,6 +26,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: simulator
     init: true
     depends_on:
       database:
@@ -40,6 +41,36 @@ services:
       PGPASSWORD: simsom
     volumes:
       - ./output:/output/output
+
+  web-api:
+    profiles: ["gui"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web-api
+    init: true
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      PGHOST: database
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      PGUSER: simsom
+      PGPASSWORD: simsom
+    volumes:
+      - ./output:/app/output
+
+  dashboard:
+    profiles: ["gui"]
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    depends_on:
+      web-api:
+        condition: service_started
+    ports:
+      - "127.0.0.1:5173:80"
 
 volumes:
   postgres18-data:

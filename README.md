@@ -233,6 +233,36 @@ For example, to override the MPI process count:
 docker compose run --rm simulator --num-procs 6
 ```
 
+#### Run the GUI with Docker
+
+The command-line workflow above remains the default Compose workflow. To run the browser interface instead, start the opt-in `gui` profile and target the dashboard service:
+
+```bash
+docker compose --profile gui up --build dashboard
+```
+
+Then open [http://127.0.0.1:5173](http://127.0.0.1:5173). This starts:
+
+- PostgreSQL 18 with the `simsom_clock` extension
+- the Flask web API with Python, MPI, `psql`, and `pg_dump`
+- the compiled React dashboard served through Nginx
+
+The simulator itself does not start until **Run simulator** is selected in the browser. Logs, JSONL files, and SQL dumps continue to be written under the host's `output/` directory.
+
+Use `Ctrl+C` to stop the foreground services, then remove the GUI containers and network with:
+
+```bash
+docker compose --profile gui down
+```
+
+To also delete the persisted PostgreSQL data and start completely fresh, run:
+
+```bash
+docker compose --profile gui down --volumes
+```
+
+Only include `--volumes` when the existing database data should be deleted.
+
 ### Manual installation
 
 #### Preparation
@@ -353,7 +383,14 @@ Current default config:
 
 ### Verification
 
-Run the minimal unit-test suite from the repository root:
+Install the web dashboard dependencies required by the complete unit-test
+suite:
+
+```bash
+./venv/bin/python -m pip install -r requirements.web.txt
+```
+
+Run the unit-test suite from the repository root:
 
 ```bash
 ./venv/bin/python -m unittest discover -s tests -v
@@ -460,7 +497,8 @@ LIMIT 20;
 Inspect the latest analytics result:
 ```sql
 SELECT analytics_summary_id, recorded_at, user_count, action_count,
-       avg_action_quality, termination_criteria, other_properties
+       simulator_timestamp_ms, avg_action_quality, termination_criteria,
+       other_properties
 FROM simsom.analytics_summary
 ORDER BY analytics_summary_id DESC
 LIMIT 1;

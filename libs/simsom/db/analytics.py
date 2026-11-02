@@ -103,6 +103,7 @@ class AnalyticsSummaryRecord:
 
     user_count: int = 0
     action_count: int = 0
+    simulator_timestamp_ms: int = 0
     avg_activity_level: float | None = None
     avg_action_quality: float | None = None
     termination_criteria: list[dict[str, Any]] = field(default_factory=list)
@@ -111,6 +112,10 @@ class AnalyticsSummaryRecord:
     def __post_init__(self) -> None:
         _require_non_negative_int("user_count", self.user_count)
         _require_non_negative_int("action_count", self.action_count)
+        _require_non_negative_int(
+            "simulator_timestamp_ms",
+            self.simulator_timestamp_ms,
+        )
         _require_optional_non_negative_number(
             "avg_activity_level",
             self.avg_activity_level,
@@ -569,6 +574,7 @@ class PostgresAnalyticsDatabase(PostgresLifecycleMixin, PostgresClientBase):
         INSERT INTO {table} (
             user_count,
             action_count,
+            simulator_timestamp_ms,
             avg_activity_level,
             avg_action_quality,
             termination_criteria,
@@ -577,6 +583,7 @@ class PostgresAnalyticsDatabase(PostgresLifecycleMixin, PostgresClientBase):
         VALUES (
             {sql_bigint(summary.user_count)},
             {sql_bigint(summary.action_count)},
+            {sql_bigint(summary.simulator_timestamp_ms)},
             {sql_float(summary.avg_activity_level)},
             {sql_float(summary.avg_action_quality)},
             {sql_json(summary.termination_criteria)},

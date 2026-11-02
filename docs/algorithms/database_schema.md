@@ -109,6 +109,7 @@ checkpoints and the final analytics report.
 | `recorded_at` | `TIMESTAMPTZ` | Required. Defaults to `NOW()`. |
 | `user_count` | `BIGINT` | Required; must be non-negative. |
 | `action_count` | `BIGINT` | Required; must be non-negative. |
+| `simulator_timestamp_ms` | `BIGINT` | Required elapsed simulated time in milliseconds since the run began; must be non-negative. |
 | `avg_activity_level` | `FLOAT` | Nullable; must be non-negative when present. |
 | `avg_action_quality` | `FLOAT` | Nullable; must be in `[0, 1]` when present. |
 | `termination_criteria` | `JSONB` | Criteria met for this report. Defaults to `[]`. |

@@ -132,6 +132,7 @@ ANALYTICS_SUMMARY_CONTRACT = TableContract(
         "recorded_at",
         "user_count",
         "action_count",
+        "simulator_timestamp_ms",
         "avg_activity_level",
         "avg_action_quality",
         "termination_criteria",
@@ -261,6 +262,9 @@ def build_shared_schema_sql(
             CONSTRAINT analytics_summary_user_count_non_negative CHECK (user_count >= 0),
         action_count BIGINT NOT NULL
             CONSTRAINT analytics_summary_action_count_non_negative CHECK (action_count >= 0),
+        simulator_timestamp_ms BIGINT NOT NULL
+            CONSTRAINT analytics_summary_simulator_timestamp_ms_non_negative
+            CHECK (simulator_timestamp_ms >= 0),
         avg_activity_level FLOAT,
         avg_action_quality FLOAT,
         termination_criteria JSONB NOT NULL DEFAULT '[]'::jsonb,

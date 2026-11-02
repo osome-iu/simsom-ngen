@@ -435,6 +435,7 @@ def to_analytics_summary_record(
     return AnalyticsSummaryRecord(
         user_count=metrics.user_count,
         action_count=metrics.action_count,
+        simulator_timestamp_ms=metrics.simulator_timestamp_ms,
         avg_activity_level=metrics.avg_activity_level if final else None,
         avg_action_quality=metrics.avg_action_quality,
         termination_criteria=[
@@ -456,6 +457,7 @@ def to_analytics_metrics(snapshot: AnalyticsSnapshot) -> AnalyticsMetrics:
     return AnalyticsMetrics(
         user_count=snapshot.user_count,
         action_count=snapshot.action_count,
+        simulator_timestamp_ms=snapshot.simulator_timestamp_ms,
         avg_activity_level=snapshot.avg_activity_level,
         avg_action_quality=snapshot.avg_action_quality,
         other_properties=snapshot.other_properties,
