@@ -743,7 +743,6 @@ function NetworkVisualization({ graph, loading, setup, runStatus, avgActionsPerU
             {isFiltered && <div><strong>{number(meta.returnedNodeCount)}</strong><span>shown users</span></div>}
             <div><strong>{number(meta.interactionCount)}</strong><span>{isFiltered ? "total interactions" : "interactions"}</span></div>
             {isFiltered && <div><strong>{number(meta.returnedInteractionCount)}</strong><span>shown interactions</span></div>}
-            <div><strong>{number(meta.returnedEdgeCount)}</strong><span>weighted edges</span></div>
             <div><strong>{number(avgActionsPerUser, 2)}</strong><span>avg. actions / user</span></div>
             <div><strong>{number(meta.originalPostCount)}</strong><span>original posts</span></div>
         </div>
@@ -751,8 +750,8 @@ function NetworkVisualization({ graph, loading, setup, runStatus, avgActionsPerU
       {meta.truncated && (
         <div className="network-sample-notice">
           {isLiveRun
-            ? <>Live network snapshot. K-core filtering is currently applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} users and {number(meta.returnedInteractionCount)} interactions across {number(meta.returnedEdgeCount)} weighted edges. Final totals are unavailable until the simulation finishes.</>
-            : <>Network generated successfully. K-core filtering was applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} of {number(meta.userCount)} users and {number(meta.returnedInteractionCount)} of {number(meta.interactionCount)} interactions across {number(meta.returnedEdgeCount)} weighted edges.</>}
+            ? <>Live network snapshot. K-core filtering is currently applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} users and {number(meta.returnedInteractionCount)} interactions. Final totals are unavailable until the simulation finishes.</>
+            : <>Network generated successfully. K-core filtering was applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} of {number(meta.userCount)} users and {number(meta.returnedInteractionCount)} of {number(meta.interactionCount)} interactions.</>}
         </div>
       )}
       <div className="network-workspace">
