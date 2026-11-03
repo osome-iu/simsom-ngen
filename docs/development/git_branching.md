@@ -142,9 +142,12 @@ That is, the type of branch followed by a forward slash followed by the issue nu
 
 ### Pull Requests
 
-Pull Requests should ALWAYS target `dev` branch.  Description of Pull Requests should include references to the related issues (if any) and any dependent Pull Requests (see section on *Stacked Branches*).  Pull Requests should never be merged without a review.  Pull Requests can remain open while reviewer comments or merge conflicts are being addressed.  
+Pull Requests should ALWAYS target `dev` branch.  Description of Pull Requests should include references to the related _public_ issues (if any) and any dependent Pull Requests (see section on *Stacked Branches*).  _Descriptions should **not** include references to private issues or code._ Pull Requests should never be merged without a review.  Pull Requests can remain open while reviewer comments or merge conflicts are being addressed.
 
 Additional work that does not address the pull request should not be completed on a branch with an open pull request.
+
+> [!NOTE]
+> Rules are in place to ensure that at least 1 reviewer approves a pull request before it is merged into `dev` and that at least 2 reviewers approve a pull request before it is merged into `main`.
 
 ### Rebase Before a Pull Requests
 
@@ -154,15 +157,21 @@ Since there are multiple people working on multiple branches, it is likely that 
 
 Branches should always be deleted immediately after a pull request is merged.  You should never work on a branch that has been deleted after a merge.  This can lead to significant conflicts and extra work.  Always create a new branch for a new task.
 
+> [!WARNING]
+> The public repository has an automation where a branch is _automatically_ deleted after a successful merge.
+
 ### Code Review Size
 
 The size of a pull request should be limited.  The lines of code changed should be minimized and kept to only those changes required for the intended task to be completed.  A smaller pull request diff size results in a faster and easier code review.  Faster code reviews over a smaller diff result in fewer bugs and fewer changes later.
 
 ## Stacked Branches / Pull Requests
 
-> *Note:*  This is an optional enhancement to a developer's workflow.  You don't have to use it as long as we're keeping code review size reasonable.  This is only if you want to continue working without waiting for a code review.  **You are not required to use stacked pull requests.**
-
+> [!NOTE]
+> This is an optional enhancement to a developer's workflow.  You don't have to use it as long as we're keeping code review size reasonable.  This is only if you want to continue working without waiting for a code review.  **You are not required to use stacked pull requests.**
 > This is a lightweight version of the "stacked pull request" methodology.  It does not rely on GitHub's *Stacked Pull Request* feature or additional tooling.  It relies on discipline, communication, and reasonable code reviews.
+
+> [!WARNING]
+> Stacked PRs should be avoided unless absolutely necessary.  Slow and steady wins this race, but sometimes we have to sprint to the goal line.
 
 There are instances where you'll complete work on a branch, create a PR for that, and need to continue work before that branch has been reviewed and merged into `dev`.  In this case, create a new branch from the branch that you've just opened a pull request for.  This child branch is known as a *stacked branch*.  The stacked branch should be named according to the normal branch naming rules.  There's nothing particularly special about a stacked branch except that it's not branched directly from `dev`.
 
