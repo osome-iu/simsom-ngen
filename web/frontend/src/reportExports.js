@@ -116,8 +116,8 @@ export function buildHtmlReport(bundle) {
       : "Still evolving";
 
   const summaryCards = [
-    ["Users / nodes", formatNumber(networkMeta.userCount ?? latest.userCount ?? nodes.length)],
-    ["Interactions / edges", formatNumber(networkMeta.interactionCount ?? edges.length)],
+    ["Users", formatNumber(networkMeta.userCount ?? latest.userCount ?? nodes.length)],
+    ["Interactions", formatNumber(networkMeta.interactionCount ?? edges.length)],
     ["Avg. actions / user", formatNumber(averageActions, 2)],
     ["Original posts", formatNumber(networkMeta.originalPostCount)],
   ];
@@ -133,16 +133,16 @@ export function buildHtmlReport(bundle) {
     ["Simulated runtime", formatDuration(runtime.simulated_runtime_seconds)],
   ];
   const signalRows = [
-    ["Average action quality", formatNumber(latest.avgActionQuality, 3)],
+    ["Average content quality", formatNumber(latest.avgActionQuality, 3)],
     ["Policy coverage", formatPercent(policy.policy_coverage)],
     ["Intervention ratio", formatPercent(policy.policy_intervention_ratio)],
     ["Average friends per user", formatNumber(networkStats.avg_friends_per_user, 2)],
     ["Average followers per user", formatNumber(networkStats.avg_followers_per_user, 2)],
   ];
   const networkRows = [
-    ["Users / nodes", networkMeta.userCount ?? nodes.length],
-    ["Shown users / nodes", networkMeta.truncated ? networkMeta.returnedNodeCount ?? nodes.length : null],
-    ["Returned interactions / edges", networkMeta.returnedEdgeCount ?? edges.length],
+    ["Users", networkMeta.userCount ?? nodes.length],
+    ["Shown users", networkMeta.truncated ? networkMeta.returnedNodeCount ?? nodes.length : null],
+    ["Returned interactions", networkMeta.returnedEdgeCount ?? edges.length],
     ["Total interactions", networkMeta.interactionCount],
     ["Original posts", networkMeta.originalPostCount],
     ["K-core level", networkMeta.truncated ? networkMeta.kCoreLevel : null],
@@ -224,7 +224,7 @@ export function buildHtmlReport(bundle) {
     <div class="cards">${summaryCards.map(([label, value]) => `<div class="card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(displayValue(value))}</strong></div>`).join("")}</div>
     <div class="primary-grid">
       <section class="panel timeline-panel">
-        <div class="panel-heading"><div><p class="kicker">Model signal</p><h2>Average action quality timeline</h2></div><span class="quality-summary">${escapeHtml(formatNumber(latest.avgActionQuality, 3))}</span></div>
+        <div class="panel-heading"><div><p class="kicker">Model signal</p><h2>Average content quality timeline</h2></div><span class="quality-summary">${escapeHtml(formatNumber(latest.avgActionQuality, 3))}</span></div>
         <div class="chart">${qualityChartSvg(series)}<div class="chart-axis"><span>${escapeHtml(formatSimulatedTime(firstSimulatedTimestamp))}</span><strong>Simulated time</strong><span>${escapeHtml(formatSimulatedTime(latestSimulatedTimestamp))}</span></div></div>
       </section>
       <aside class="side-column">
@@ -301,7 +301,7 @@ function qualityChartSvg(series) {
     }];
   });
   if (!samples.length) {
-    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="No average action quality snapshots"><text x="${width / 2}" y="${height / 2}" text-anchor="middle" class="quality-axis-label">No analytics snapshots</text></svg>`;
+    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="No average content quality snapshots"><text x="${width / 2}" y="${height / 2}" text-anchor="middle" class="quality-axis-label">No analytics snapshots</text></svg>`;
   }
 
   const values = samples.map(({ value }) => value);
@@ -335,9 +335,9 @@ function qualityChartSvg(series) {
     return `<line class="quality-grid" x1="${plotLeft}" x2="${width - plotRight}" y1="${y}" y2="${y}"/><text class="quality-axis-label" x="${plotLeft - 8}" y="${y + 4}" text-anchor="end">${escapeHtml(formatNumber(value, 3))}</text>`;
   }).join("");
   const dots = points.map(({ x, y, value, simulatedTimestamp }) => (
-    `<circle class="quality-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5"><title>${escapeHtml(`${formatSimulatedTime(simulatedTimestamp)} · Average action quality ${formatNumber(value, 3)}`)}</title></circle>`
+    `<circle class="quality-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5"><title>${escapeHtml(`${formatSimulatedTime(simulatedTimestamp)} · Average content quality ${formatNumber(value, 3)}`)}</title></circle>`
   )).join("");
-  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Average action quality over simulated time"><defs><linearGradient id="quality-area-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0072b2" stop-opacity=".3"/><stop offset="100%" stop-color="#0072b2" stop-opacity="0"/></linearGradient></defs>${grid}<polygon points="${area}" fill="url(#quality-area-fill)"/><polyline class="quality-line" points="${polyline}"/>${dots}</svg>`;
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Average content quality over simulated time"><defs><linearGradient id="quality-area-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0072b2" stop-opacity=".3"/><stop offset="100%" stop-color="#0072b2" stop-opacity="0"/></linearGradient></defs>${grid}<polygon points="${area}" fill="url(#quality-area-fill)"/><polyline class="quality-line" points="${polyline}"/>${dots}</svg>`;
 }
 
 function keyValueTable(rows, className = "") {

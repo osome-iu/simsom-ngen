@@ -136,7 +136,7 @@ The current prototype demonstrates these first-pass summary outputs:
 | Original-post count | Network summary | Reports posts that have no parent-author endpoint to draw as an edge |
 | Average actions per user | Network summary | Normalizes activity by population |
 | Simulated time | Digital and analog clock | Shows model time separately from wall-clock runtime |
-| Average action quality | Timeline over simulated time | Tracks the primary quality outcome |
+| Average content quality | Timeline over simulated time | Tracks the primary quality outcome |
 | Convergence state and reason | Status beneath the timeline | Explains whether and why the model converged |
 | Policy coverage and intervention ratio | Additional run analytics | Summarizes policy processing and action |
 | Software and simulated runtime | Additional run analytics | Separates compute time from modeled time |
@@ -145,7 +145,7 @@ The current prototype demonstrates these first-pass summary outputs:
 
 ### 4.3 Time-series and distribution visualizations
 
-The first pass plots average action quality across analytics snapshots with
+The first pass plots average content quality across analytics snapshots with
 simulated time on the horizontal axis. Hovering a point exposes its simulated
 time and quality value. Convergence status and its reason accompany the chart.
 

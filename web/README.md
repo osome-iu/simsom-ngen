@@ -23,7 +23,7 @@ de-emphasize nodes that are no longer connected by a visible interaction.
 Selecting a visible node or edge opens a modal with its user-facing details.
 
 The results dashboard places the network beside a digital and analog simulated
-clock and an average-action-quality timeline plotted over simulated time. The
+clock and an average content quality timeline plotted over simulated time. The
 timeline also reports convergence status and its reason. Less prominent
 quality, policy, runtime, network, and timing measurements remain available in
 the collapsible **Additional run analytics** section.
@@ -181,7 +181,7 @@ not editable from the browser.
 After the first analytics snapshot, choose **Export results** above the
 dashboard. The dashboard can download:
 
-- A standalone, print-friendly HTML report with the average-action-quality
+- A standalone, print-friendly HTML report with the average content quality
   timeline, simulated time, convergence result, network statistics, additional
   run details, and the run configuration.
 - An analytics CSV containing every snapshot and flattened nested measurements.
