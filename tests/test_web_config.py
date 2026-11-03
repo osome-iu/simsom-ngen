@@ -92,6 +92,37 @@ class WebConfigTests(unittest.TestCase):
             sql,
         )
 
+    def test_network_query_groups_interactions_and_calculates_total_degree(self) -> None:
+        sql = AnalyticsRepository()._network_rows_sql(100, None)
+
+        self.assertIn('PARTITION BY source, target, "actionType"', sql)
+        self.assertIn('COUNT(*) OVER interaction_group AS "interactionCount"', sql)
+        self.assertIn('FROM grouped_interactions', sql)
+        self.assertIn('SUM(interaction_count)::BIGINT AS degree', sql)
+        self.assertIn('COALESCE(node_degrees.degree, 0) AS degree', sql)
+
+    def test_network_metadata_distinguishes_grouped_edges_from_interactions(self) -> None:
+        repository = AnalyticsRepository()
+        stats = {
+            "available": True,
+            "meta": {"userCount": 2, "interactionCount": 3},
+            "userIds": [1, 2],
+        }
+        rows = {
+            "available": True,
+            "nodes": [{"id": 1}, {"id": 2}],
+            "edges": [
+                {"id": 10, "interactionCount": 2},
+                {"id": 12, "interactionCount": 1},
+            ],
+        }
+
+        with patch.object(repository, "_fetch_json", side_effect=[stats, rows]):
+            payload = repository.fetch_network(edge_limit=100, node_limit=100)
+
+        self.assertEqual(payload["meta"]["returnedEdgeCount"], 2)
+        self.assertEqual(payload["meta"]["returnedInteractionCount"], 3)
+
 
 class DatabaseReadinessTests(unittest.TestCase):
     def test_results_send_sql_to_psql_through_standard_input(self) -> None:
