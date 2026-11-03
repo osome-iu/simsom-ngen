@@ -194,6 +194,21 @@ function App() {
     latest?.userCount ? latest.actionCount / latest.userCount : null
   );
   const isRunning = run.status === "running" || run.status === "stopping";
+  const runStartedAt = Date.parse(run.startedAt || "");
+  const lifecycleStartedAt = Date.parse(results.lifecycle?.startedAt || "");
+  // The database can retain results from an earlier run. Do not expose its
+  // clock value until analytics confirms that a snapshot belongs to the run
+  // currently owned by this dashboard process.
+  const hasCurrentRunSnapshot = Boolean(
+    run.id
+    && latest
+    && Number.isFinite(runStartedAt)
+    && Number.isFinite(lifecycleStartedAt)
+    && lifecycleStartedAt >= runStartedAt
+  );
+  const simulatedClockTimestamp = hasCurrentRunSnapshot
+    ? results.currentSimulatorTimestampMs ?? latest.simulatorTimestampMs
+    : null;
 
   const statusCopy = useMemo(() => ({
     idle: "Ready",
@@ -332,7 +347,7 @@ function App() {
 
             <div className="dashboard-side-column">
               <SimulatedClock
-                timestamp={results.currentSimulatorTimestampMs ?? latest?.simulatorTimestampMs}
+                timestamp={simulatedClockTimestamp}
                 isRunning={isRunning}
               />
               <Panel className="quality-timeline-panel" title="Average content quality timeline">
@@ -724,19 +739,20 @@ function NetworkVisualization({ graph, loading, setup, runStatus, avgActionsPerU
           {loading && <em>Refreshing…</em>}
         </div>
         <div className="network-meta-stats">
-          <div><strong>{number(meta.userCount)}</strong><span>{isFiltered ? "total users" : "users"}</span></div>
-          {isFiltered && <div><strong>{number(meta.returnedNodeCount)}</strong><span>shown users</span></div>}
-          <div><strong>{number(meta.interactionCount)}</strong><span>{isFiltered ? "total interactions" : "interactions"}</span></div>
-          {isFiltered && <div><strong>{number(meta.returnedEdgeCount)}</strong><span>shown interactions</span></div>}
-          <div><strong>{number(avgActionsPerUser, 2)}</strong><span>avg. actions / user</span></div>
-          <div><strong>{number(meta.originalPostCount)}</strong><span>original posts</span></div>
+            <div><strong>{number(meta.userCount)}</strong><span>{isFiltered ? "total users" : "users"}</span></div>
+            {isFiltered && <div><strong>{number(meta.returnedNodeCount)}</strong><span>shown users</span></div>}
+            <div><strong>{number(meta.interactionCount)}</strong><span>{isFiltered ? "total interactions" : "interactions"}</span></div>
+            {isFiltered && <div><strong>{number(meta.returnedInteractionCount)}</strong><span>shown interactions</span></div>}
+            <div><strong>{number(meta.returnedEdgeCount)}</strong><span>weighted edges</span></div>
+            <div><strong>{number(avgActionsPerUser, 2)}</strong><span>avg. actions / user</span></div>
+            <div><strong>{number(meta.originalPostCount)}</strong><span>original posts</span></div>
         </div>
       </div>
       {meta.truncated && (
         <div className="network-sample-notice">
           {isLiveRun
-            ? <>Live network snapshot. K-core filtering is currently applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} users and {number(meta.returnedEdgeCount)} interactions. Final totals are unavailable until the simulation finishes.</>
-            : <>Network generated successfully. K-core filtering was applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} of {number(meta.userCount)} users and {number(meta.returnedEdgeCount)} of {number(meta.interactionCount)} interactions.</>}
+            ? <>Live network snapshot. K-core filtering is currently applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} users and {number(meta.returnedInteractionCount)} interactions across {number(meta.returnedEdgeCount)} weighted edges. Final totals are unavailable until the simulation finishes.</>
+            : <>Network generated successfully. K-core filtering was applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} of {number(meta.userCount)} users and {number(meta.returnedInteractionCount)} of {number(meta.interactionCount)} interactions across {number(meta.returnedEdgeCount)} weighted edges.</>}
         </div>
       )}
       <div className="network-workspace">
@@ -750,7 +766,7 @@ function NetworkVisualization({ graph, loading, setup, runStatus, avgActionsPerU
       <div className="network-footnote">
         <span>Drag to rotate · shift-drag to pan · scroll to zoom · select a node or edge for details</span>
         <span>
-          Directed edges connect an acting user to the parent post author.
+          Directed weighted edges connect an acting user to the parent post author. Edge width represents interaction frequency.
           {meta.truncated ? " Displaying the k-core-filtered network." : ""}
         </span>
       </div>
@@ -807,6 +823,12 @@ function NetworkDetailModal({ graph, selection, onClose }) {
     const node = selection.item;
     const outgoing = graph.edges.filter((edge) => edge.source === node.id);
     const incoming = graph.edges.filter((edge) => edge.target === node.id);
+    const outgoingCount = outgoing.reduce(
+      (total, edge) => total + Number(edge.interactionCount || 1), 0,
+    );
+    const incomingCount = incoming.reduce(
+      (total, edge) => total + Number(edge.interactionCount || 1), 0,
+    );
     const neighbors = new Set([
       ...outgoing.map((edge) => edge.target),
       ...incoming.map((edge) => edge.source),
@@ -827,8 +849,9 @@ function NetworkDetailModal({ graph, selection, onClose }) {
         <dl className="network-detail-list">
           <Detail label="Activity level" value={number(node.activityLevel, 3)} />
           <Detail label="User quality" value={number(node.quality, 3)} />
-          <Detail label="Outgoing actions" value={number(outgoing.length)} />
-          <Detail label="Incoming actions" value={number(incoming.length)} />
+          <Detail label="Weighted degree" value={number(node.weightedDegree)} />
+          <Detail label="Outgoing interactions" value={number(outgoingCount)} />
+          <Detail label="Incoming interactions" value={number(incomingCount)} />
           <Detail label="Connected users" value={number(neighbors.size)} />
         </dl>
         {graph.meta?.truncated && (
@@ -850,13 +873,14 @@ function NetworkDetailModal({ graph, selection, onClose }) {
     >
       <InspectorHeader
         color={NETWORK_ACTION_COLORS[edge.actionType] || "#b7c4ce"}
-        kicker="Selected interaction"
+        kicker="Selected weighted edge"
         title={`${edge.actionType.charAt(0).toUpperCase()}${edge.actionType.slice(1)}`}
       />
       <dl className="network-detail-list">
+        <Detail label="Interaction frequency" value={number(edge.interactionCount)} />
         <Detail label="Actor" value={actor?.label || `User ${edge.source}`} />
         <Detail label="Parent author" value={parentAuthor?.label || `User ${edge.target}`} />
-        <Detail label="Simulated time" value={simulatedTime(Number(edge.timestamp)) || "—"} />
+        <Detail label="Latest simulated time" value={simulatedTime(Number(edge.timestamp)) || "—"} />
         <Detail label="Content quality" value={number(edge.quality, 3)} />
         <Detail label="Content appeal" value={number(edge.appeal, 3)} />
         <Detail label="Content views" value={number(edge.contentViewCount)} />
