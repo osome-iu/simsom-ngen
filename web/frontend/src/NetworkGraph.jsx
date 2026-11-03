@@ -36,6 +36,13 @@ const DEFAULT_EDGE_WIDTH_SCALE = 0.24;
 const FILTERED_OUT_NODE_OPACITY = 0.22;
 const EDGE_FILTERED_NODE_OPACITY = 0.3;
 const DEFAULT_EDGE_OPACITY_SCALE = 0.3;
+// The output range caps visual size without capping degree values. Scaling the
+// full log-weighted-degree domain keeps the most connected node distinguishable.
+// Helios interprets these values as node diameters. A broad-but-bounded range
+// is needed because the logarithmic transform compresses medium and high
+// degrees; the bounded diameter range keeps hubs distinct without crowding.
+const NODE_SIZE_RANGE = [0.5, 10];
+const EDGE_WIDTH_RANGE = [1.1, 3.2];
 const CONNECTED_NETWORK_FRAME_COVERAGE = 0.85;
 const CONNECTED_NETWORK_FRAME_PADDING = 0.02;
 const CAMERA_ZOOM_FACTOR = 1.4;
@@ -129,6 +136,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
       edgeIndexesRef.current,
       hiddenEdgeTypesRef.current,
     );
+    configureMeasureMappers(helios, currentNodes, currentEdges);
     nodesByIndexRef.current = itemsByNetworkIndex(currentNodes, nodeIndexesRef.current);
     edgesByIndexRef.current = itemsByNetworkIndex(currentEdges, edgeIndexesRef.current);
     if (currentEdges.length) {
@@ -138,13 +146,6 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
         domain: ACTION_TYPE_DOMAIN,
         range: Object.values(ACTION_TYPE_COLORS),
         defaultValue: "#b7c4ceff",
-      });
-      helios.behavior.mappers.setChannelConfig("edge", "width", {
-        type: "linear",
-        attributes: "quality",
-        domain: [0, 1],
-        range: [1.1, 3.2],
-        defaultValue: 1.2,
       });
     }
 
@@ -321,21 +322,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
           domain: ACTION_TYPE_DOMAIN,
           range: Object.values(ACTION_TYPE_COLORS),
         };
-        // Do not spread a large node array into Math.max. With a capped
-        // 50,000-node sample this can still exceed JavaScript's
-        // function-argument limit.
-        const maxActivity = graph.nodes.reduce(
-          (maximum, node) => Math.max(maximum, Number(node.activityLevel) || 0),
-          1,
-        );
-
-        helios.behavior.mappers.setChannelConfig("node", "size", {
-          type: "linear",
-          attributes: "activityLevel",
-          domain: [0, maxActivity],
-          range: [2, 9],
-          defaultValue: 3,
-        });
+        configureMeasureMappers(helios, graph.nodes, visibleEdges);
         configureVisibilityMappers(helios);
         if (visibleEdges.length) {
           helios.behavior.mappers.setChannelConfig("edge", "color", {
@@ -344,13 +331,6 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
             domain: actionCategories.domain,
             range: actionCategories.range,
             defaultValue: "#b7c4ceff",
-          });
-          helios.behavior.mappers.setChannelConfig("edge", "width", {
-            type: "linear",
-            attributes: "quality",
-            domain: [0, 1],
-            range: [1.1, 3.2],
-            defaultValue: 1.2,
           });
         }
         helios.behavior.appearance.appearance({
@@ -883,8 +863,11 @@ function writeGraphAttributes(
     },
   );
   network.nodeAttribute(
-    "activityLevel",
-    (current, index) => finiteNumber(nodesByIndex.get(index)?.activityLevel, current),
+    "degreeSize",
+    (current, index) => {
+      const degree = Math.max(0, finiteNumber(nodesByIndex.get(index)?.weightedDegree, 0));
+      return Math.log1p(degree);
+    },
   );
   network.nodeAttribute(
     "quality",
@@ -915,9 +898,45 @@ function writeGraphAttributes(
     },
   );
   network.edgeAttribute(
-    "quality",
-    (current, index) => finiteNumber(edgesByIndex.get(index)?.quality, current),
+    "interactionCountSize",
+    (current, index) => {
+      const count = Math.max(1, finiteNumber(edgesByIndex.get(index)?.interactionCount, 1));
+      return Math.log(count);
+    },
   );
+}
+
+function configureMeasureMappers(helios, nodes, edges) {
+  const maxDegreeLog = nodes.reduce(
+    (maximum, node) => Math.max(
+      maximum,
+      Math.log1p(Math.max(0, finiteNumber(node.weightedDegree, 0))),
+    ),
+    0,
+  );
+  helios.behavior.mappers.setChannelConfig("node", "size", {
+    type: "linear",
+    attributes: "degreeSize",
+    domain: [0, maxDegreeLog || 1],
+    range: NODE_SIZE_RANGE,
+    defaultValue: NODE_SIZE_RANGE[0],
+  });
+
+  if (!edges.length) return;
+  const maxCountLog = edges.reduce(
+    (maximum, edge) => Math.max(
+      maximum,
+      Math.log(Math.max(1, finiteNumber(edge.interactionCount, 1))),
+    ),
+    1,
+  );
+  helios.behavior.mappers.setChannelConfig("edge", "width", {
+    type: "linear",
+    attributes: "interactionCountSize",
+    domain: [0, maxCountLog],
+    range: EDGE_WIDTH_RANGE,
+    defaultValue: EDGE_WIDTH_RANGE[0],
+  });
 }
 
 function writeFilterAttributes(
@@ -1030,7 +1049,8 @@ function unhighlightedNodeStyle(opacityMul) {
 }
 
 function edgeLabel(edge) {
-  return `${edge.actionType} #${edge.id} · User ${edge.source} → User ${edge.target}`;
+  const count = Math.max(1, finiteNumber(edge.interactionCount, 1));
+  return `${edge.actionType} ×${count} · User ${edge.source} → User ${edge.target}`;
 }
 
 function toRgbaHex(color) {
