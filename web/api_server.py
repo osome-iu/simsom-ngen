@@ -733,7 +733,14 @@ class AnalyticsRepository:
         edge_limit: int = DEFAULT_NETWORK_EDGE_LIMIT,
         node_limit: int = DEFAULT_NETWORK_NODE_LIMIT,
     ) -> dict[str, Any]:
-        """Return users and post interactions in Helios-friendly node/edge rows."""
+        """Return users and weighted interaction edges in Helios-friendly rows.
+
+        Repeated actions with the same actor, parent author, and action type are
+        represented by one weighted edge. Node weighted degree and edge counts
+        are calculated from the (possibly limited or k-core-filtered)
+        interactions returned by this snapshot, so the visual measures always
+        describe the shown graph.
+        """
         if isinstance(edge_limit, bool) or not isinstance(edge_limit, int):
             raise ValueError("edgeLimit must be an integer")
         if edge_limit < 1 or edge_limit > MAX_NETWORK_EDGE_LIMIT:
@@ -806,10 +813,14 @@ class AnalyticsRepository:
 
         nodes = payload.get("nodes") or []
         edges = payload.get("edges") or []
+        returned_interaction_count = sum(
+            int(edge.get("interactionCount") or 0) for edge in edges
+        )
         payload["meta"] = {
             **meta,
             "returnedNodeCount": len(nodes),
             "returnedEdgeCount": len(edges),
+            "returnedInteractionCount": returned_interaction_count,
             "edgeLimit": edge_limit,
             "nodeLimit": node_limit,
             "truncated": truncated,
@@ -1143,6 +1154,53 @@ class AnalyticsRepository:
             WHERE {edge_predicate}
             ORDER BY action.action_id DESC
             LIMIT {edge_limit}
+        ), ranked_interactions AS MATERIALIZED (
+            SELECT
+                interaction_rows.*,
+                MIN(id) OVER interaction_group AS "groupId",
+                COUNT(*) OVER interaction_group AS "interactionCount",
+                ROW_NUMBER() OVER (
+                    PARTITION BY source, target, "actionType"
+                    ORDER BY id DESC
+                ) AS representative_rank
+            FROM interaction_rows
+            WINDOW interaction_group AS (
+                PARTITION BY source, target, "actionType"
+            )
+        ), grouped_interactions AS MATERIALIZED (
+            -- Keep the newest row's detail fields while using the oldest action
+            -- ID as a stable identity as additional matching actions arrive.
+            SELECT
+                "groupId" AS id,
+                source,
+                target,
+                "actionType",
+                "interactionCount",
+                timestamp,
+                "contentActionId",
+                quality,
+                appeal,
+                "contentEmbeddingDimensions",
+                "contentViewCount",
+                "contentRepeatActorCount",
+                "moderationActions",
+                "contentModerationActions",
+                "parentActionId"
+            FROM ranked_interactions
+            WHERE representative_rank = 1
+        ), node_strengths AS MATERIALIZED (
+            -- Directed weighted degree is incoming plus outgoing interaction
+            -- frequencies. A self-interaction therefore contributes two, as
+            -- it has both an incoming and an outgoing endpoint.
+            SELECT user_id, SUM(interaction_count)::BIGINT AS weighted_degree
+            FROM (
+                SELECT source AS user_id, "interactionCount" AS interaction_count
+                FROM grouped_interactions
+                UNION ALL
+                SELECT target AS user_id, "interactionCount" AS interaction_count
+                FROM grouped_interactions
+            ) AS endpoints
+            GROUP BY user_id
         )
         SELECT json_build_object(
             'nodes', COALESCE(
@@ -1154,8 +1212,10 @@ class AnalyticsRepository:
                             'User ' || users.user_id AS label,
                             users.user_type AS "userType",
                             users.activity_level AS "activityLevel",
-                            (users.user_behavior->>'quality')::FLOAT AS quality
+                            (users.user_behavior->>'quality')::FLOAT AS quality,
+                            COALESCE(node_strengths.weighted_degree, 0) AS "weightedDegree"
                         FROM {user_table} AS users
+                        LEFT JOIN node_strengths ON node_strengths.user_id = users.user_id
                         WHERE {node_predicate}
                         ORDER BY users.user_id
                     ) AS node_row
@@ -1166,7 +1226,7 @@ class AnalyticsRepository:
                 (
                     SELECT json_agg(row_to_json(edge_row) ORDER BY edge_row.id)
                     FROM (
-                        SELECT * FROM interaction_rows ORDER BY id
+                        SELECT * FROM grouped_interactions ORDER BY id
                     ) AS edge_row
                 ),
                 '[]'::json
