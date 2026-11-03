@@ -92,16 +92,19 @@ class WebConfigTests(unittest.TestCase):
             sql,
         )
 
-    def test_network_query_groups_interactions_and_calculates_total_degree(self) -> None:
+    def test_network_query_groups_interactions_and_calculates_weighted_degree(self) -> None:
         sql = AnalyticsRepository()._network_rows_sql(100, None)
 
         self.assertIn('PARTITION BY source, target, "actionType"', sql)
         self.assertIn('COUNT(*) OVER interaction_group AS "interactionCount"', sql)
         self.assertIn('FROM grouped_interactions', sql)
-        self.assertIn('SUM(interaction_count)::BIGINT AS degree', sql)
-        self.assertIn('COALESCE(node_degrees.degree, 0) AS degree', sql)
+        self.assertIn('SUM(interaction_count)::BIGINT AS weighted_degree', sql)
+        self.assertIn(
+            'COALESCE(node_strengths.weighted_degree, 0) AS "weightedDegree"',
+            sql,
+        )
 
-    def test_network_metadata_distinguishes_grouped_edges_from_interactions(self) -> None:
+    def test_network_metadata_distinguishes_weighted_edges_from_interactions(self) -> None:
         repository = AnalyticsRepository()
         stats = {
             "available": True,
