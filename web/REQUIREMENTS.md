@@ -137,11 +137,11 @@ The current prototype demonstrates these first-pass summary outputs:
 | Average actions per user | Network summary | Normalizes activity by population |
 | Simulated time | Digital and analog clock | Shows model time separately from wall-clock runtime |
 | Average content quality | Timeline over simulated time | Tracks the primary quality outcome |
-| Convergence state and reason | Status beneath the timeline | Explains whether and why the model converged |
+| Run outcome and reason | Status beneath the timeline | Distinguishes evolving, converged, stopped, and failed runs and explains why the run ended |
 | Policy coverage and intervention ratio | Additional run analytics | Summarizes policy processing and action |
 | Software and simulated runtime | Additional run analytics | Separates compute time from modeled time |
 | Average friends/followers per user | Additional run analytics | Summarizes network structure |
-| Inter-activity timing | Additional run analytics | Shows min, median, mean, p90, p99, and max timing |
+| Interaction types | Additional run analytics | Shows each action type as a percentage of simulated activity |
 
 ### 4.3 Time-series and distribution visualizations
 
