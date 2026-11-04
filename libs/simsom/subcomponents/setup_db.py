@@ -52,6 +52,7 @@ class EdgeGenerationFunctionSpec:
     phases: tuple[str, ...]
     method_name: str
     requires_follower_counts: bool
+    requires_profiles: bool = False
 
 
 @dataclass(frozen=True)
@@ -132,7 +133,14 @@ class _CompactArray:
 
 @dataclass
 class CompactUserPopulation:
-    """Exact user-type assignments stored as compact integer codes."""
+    """Exact user-type assignments stored as compact integer codes.
+
+    When `track_profiles` is true, the population also keeps one unit-length
+    `float32` copy of every user's `vector_profile` in `profile_storage`,
+    filled chunk by chunk while the user stream is consumed, for edge
+    functions that read profiles. See
+    docs/algorithms/controller.md#synthetic-execution-order-and-state.
+    """
 
     type_names: tuple[str, ...]
     type_counts: tuple[int, ...]
@@ -141,6 +149,63 @@ class CompactUserPopulation:
     user_id_dtype: Any
     assignment_storage: _CompactArray | None = None
     type_id_storage: tuple[_CompactArray | None, ...] = ()
+    track_profiles: bool = False
+    profile_storage: _CompactArray | None = None
+    profiles_filled: int = 0
+
+    @property
+    def profiles(self) -> np.ndarray | None:
+        """Return the stored unit-length profile rows, or None when not stored.
+
+        Returns:
+            np.ndarray | None: `float32` array of shape `(user_count, dim)`;
+            row `user_id - 1` is that user's `vector_profile` scaled to unit
+            length. None when profiles are not tracked or not yet stored.
+            Network generation reads it to compute cosine similarities.
+        """
+        return None if self.profile_storage is None else self.profile_storage.array
+
+    def store_profiles(self, start: int, vectors: np.ndarray) -> None:
+        """Keep unit-length copies of one chunk of user profile vectors.
+
+        Called by `DefaultSetupDbPlanner._iter_users` for every user chunk,
+        with the same values written to `vector_profile`. Does nothing when
+        `track_profiles` is false, so no memory is used when no configured
+        edge function reads profiles. The storage, `4 * dim` bytes per user,
+        is allocated on the first call and memory-mapped above 256 MiB like
+        the other compact arrays.
+
+        Parameters:
+            start (int): Zero-based position of the chunk's first user, that
+                is `user_id - 1`.
+            vectors (np.ndarray): Array of shape `(chunk_size, dim)` with the
+                chunk's profile vectors, in user-ID order.
+
+        Raises:
+            ValueError: If `dim` differs from an earlier chunk, or a vector is
+                not finite (see `_unit_rows`).
+
+        Example:
+            >>> population.store_profiles(0, np.array([[3.0, 4.0]]))
+            >>> population.profiles[0]
+            array([0.6, 0.8], dtype=float32)
+        """
+        if not self.track_profiles:
+            return
+        rows = _unit_rows(vectors)
+        if self.profile_storage is None:
+            self.profile_storage = _CompactArray(
+                (self.user_count, rows.shape[1]),
+                np.float32,
+                zero=True,
+            )
+        if rows.shape[1] != self.profile_storage.array.shape[1]:
+            raise ValueError(
+                "every vector_profile must have the same size, got "
+                f"{rows.shape[1]} and {self.profile_storage.array.shape[1]}"
+            )
+        self.profile_storage.array[start : start + len(rows)] = rows
+        self.profiles_filled = start + len(rows)
 
     @property
     def user_count(self) -> int:
@@ -180,7 +245,10 @@ class CompactUserPopulation:
         }
 
     def close(self) -> None:
-        """Release temporary compact assignment and type-index storage."""
+        """Release temporary compact assignment, type-index and profile storage."""
+        if self.profile_storage is not None:
+            self.profile_storage.close()
+            self.profile_storage = None
         for storage in self.type_id_storage:
             if storage is not None:
                 storage.close()
@@ -194,8 +262,17 @@ class CompactUserPopulation:
 class _NetworkGenerationState:
     """Retain only compact cross-phase state required by configured wrappers."""
 
-    def __init__(self, user_count: int, *, track_follower_counts: bool) -> None:
+    def __init__(
+        self,
+        user_count: int,
+        *,
+        track_follower_counts: bool,
+        profiles: np.ndarray | None = None,
+    ) -> None:
         self.total_edges = 0
+        # Unit-length profile rows indexed by `user_id - 1`, or None when no
+        # runnable edge function reads profiles. Owned by the caller.
+        self.profiles = profiles
         self._follower_storage = (
             _CompactArray(user_count, np.uint64, zero=True)
             if track_follower_counts
@@ -401,13 +478,17 @@ def edge_generation_function(
     *,
     phases: tuple[str, ...],
     requires_follower_counts: bool = False,
+    requires_profiles: bool = False,
 ):
     """
     Attach config-visible behavior and compact-state needs to an edge method.
 
     A rule must declare `requires_follower_counts=True` only when its sampling
     depends on incoming degree. The planner uses this metadata to avoid an
-    otherwise unnecessary eight-byte-per-user state array.
+    otherwise unnecessary eight-byte-per-user state array. Likewise, a rule
+    declares `requires_profiles=True` only when it reads users'
+    `vector_profile`; the planner then keeps one unit-length `float32` profile
+    row per user and passes it as `state.profiles`.
     """
     def decorator(function):
         setattr(
@@ -418,6 +499,7 @@ def edge_generation_function(
                 phases=phases,
                 method_name=function.__name__,
                 requires_follower_counts=requires_follower_counts,
+                requires_profiles=requires_profiles,
             ),
         )
         return function
@@ -508,6 +590,17 @@ class DefaultSetupDbPlanner:
         population = self._build_compact_user_population(
             build_type_index=source_spec.name == "synthetic"
         )
+        try:
+            population.track_profiles = (
+                source_spec.name == "synthetic"
+                and self._network_requires_profiles(
+                    self._user_types(),
+                    population.user_ids_by_type(),
+                )
+            )
+        except BaseException:
+            population.close()
+            raise
         return SetupDbStream(
             user_count=population.user_count,
             users=self._iter_users(population),
@@ -696,6 +789,7 @@ class DefaultSetupDbPlanner:
             stop = min(start + USER_PROFILE_CHUNK_SIZE, total_users)
             chunk_size = stop - start
             vector_profiles = self._draw_vector_profiles(chunk_size)
+            population.store_profiles(start, vector_profiles)
             type_codes = population.codes_for_slice(start, stop)
             activity_levels = np.zeros(chunk_size, dtype=np.float64)
             qualities = np.empty(chunk_size, dtype=np.float64)
@@ -778,8 +872,17 @@ class DefaultSetupDbPlanner:
     ) -> Iterator[FollowerNetworkRecord]:
         """Generate network rows lazily after the user stream is consumed."""
         if source_spec.name == "synthetic":
+            if (
+                population.track_profiles
+                and population.profiles_filled != population.user_count
+            ):
+                raise RuntimeError(
+                    "network generation needs every user profile; consume the "
+                    "user stream before the follower-network stream"
+                )
             yield from self._iter_synthetic_follower_network_from_ids(
-                population.user_ids_by_type()
+                population.user_ids_by_type(),
+                profiles=population.profiles,
             )
             return
         network_file = self._network_file_path()
@@ -851,24 +954,44 @@ class DefaultSetupDbPlanner:
         See docs/algorithms/controller.md#user-generation-math.
         """
         _require_list("users", users, UserRecord)
+        users_by_type = self._users_by_type(users)
+        profiles = None
+        if self._network_requires_profiles(self._user_types(), users_by_type):
+            profiles = _profile_rows_from_users(users)
         return list(
             self._iter_synthetic_follower_network_from_ids(
-                self._users_by_type(users)
+                users_by_type,
+                profiles=profiles,
             )
         )
 
     def _build_synthetic_follower_network_from_ids(
         self,
         users_by_type: dict[str, Sequence[int]],
+        profiles: np.ndarray | None = None,
     ) -> list[FollowerNetworkRecord]:
-        """Materialize compact-ID generation for tests and small direct callers."""
-        return list(self._iter_synthetic_follower_network_from_ids(users_by_type))
+        """Materialize compact-ID generation for tests and small direct callers.
+
+        `profiles` holds unit-length rows indexed by `user_id - 1`; only edge
+        functions that read profiles need it.
+        """
+        return list(
+            self._iter_synthetic_follower_network_from_ids(
+                users_by_type,
+                profiles=profiles,
+            )
+        )
 
     def _iter_synthetic_follower_network_from_ids(
         self,
         users_by_type: dict[str, Sequence[int]],
+        profiles: np.ndarray | None = None,
     ) -> Iterator[FollowerNetworkRecord]:
-        """Yield synthetic edges while retaining only wrapper-required state."""
+        """Yield synthetic edges while retaining only wrapper-required state.
+
+        `profiles`, unit-length rows indexed by `user_id - 1`, is passed to
+        edge functions as `state.profiles`.
+        """
         user_count = sum(len(user_ids) for user_ids in users_by_type.values())
         if user_count < 2:
             return
@@ -881,6 +1004,7 @@ class DefaultSetupDbPlanner:
         with _NetworkGenerationState(
             user_count,
             track_follower_counts=track_follower_counts,
+            profiles=profiles,
         ) as state:
             for phase in (
                 WITHIN_TYPE_NETWORKING_PHASE,
@@ -905,6 +1029,66 @@ class DefaultSetupDbPlanner:
         users_by_type: dict[str, Sequence[int]],
     ) -> bool:
         """Return whether any runnable wrapper needs incoming-degree state."""
+        return any(
+            spec.requires_follower_counts
+            for spec in self._runnable_edge_generation_specs(
+                user_types,
+                users_by_type,
+            )
+        )
+
+    def _network_requires_profiles(
+        self,
+        user_types: dict[str, Any],
+        users_by_type: dict[str, Sequence[int]],
+    ) -> bool:
+        """Return whether any runnable wrapper reads user profile vectors.
+
+        Used by `build_stream` and `_build_synthetic_follower_network` to
+        decide whether to keep one unit-length profile row per user. See
+        docs/algorithms/controller.md#synthetic-execution-order-and-state.
+
+        Parameters:
+            user_types (dict[str, Any]): `setup_db.user_types` config.
+            users_by_type (dict[str, Sequence[int]]): User IDs of each type.
+
+        Returns:
+            bool: True when an edge function that will run declares
+            `requires_profiles=True` in `edge_generation_function`.
+
+        Raises:
+            ValueError: If a configured edge function is unknown for its phase.
+        """
+        return any(
+            spec.requires_profiles
+            for spec in self._runnable_edge_generation_specs(
+                user_types,
+                users_by_type,
+            )
+        )
+
+    def _runnable_edge_generation_specs(
+        self,
+        user_types: dict[str, Any],
+        users_by_type: dict[str, Sequence[int]],
+    ) -> Iterator[EdgeGenerationFunctionSpec]:
+        """Yield the specs of configured edge functions that will run.
+
+        A function runs when its source type has users and, in the cross-type
+        phase, when another type has users. Shared by the checks that decide
+        which compact state network generation needs.
+
+        Parameters:
+            user_types (dict[str, Any]): `setup_db.user_types` config.
+            users_by_type (dict[str, Sequence[int]]): User IDs of each type.
+
+        Returns:
+            Iterator[EdgeGenerationFunctionSpec]: One spec per runnable
+            (user type, phase) pair, in generation order.
+
+        Raises:
+            ValueError: If a configured edge function is unknown for its phase.
+        """
         populated_types = {
             user_type
             for user_type, user_ids in users_by_type.items()
@@ -926,9 +1110,8 @@ class DefaultSetupDbPlanner:
                     phase != CROSS_TYPE_NETWORKING_PHASE
                     or bool(populated_types - {str(user_type)})
                 )
-                if spec.requires_follower_counts and has_targets:
-                    return True
-        return False
+                if has_targets:
+                    yield spec
 
     def _run_edge_generation_function(
         self,
@@ -2150,6 +2333,72 @@ class DefaultSetupDbPlanner:
         ) / lambda_slope
         values = np.where(high_cluster, 100.0 + log_term, -log_term)
         return np.clip(values / 100.0, 0.0, 1.0)
+
+
+def _unit_rows(vectors: Any) -> np.ndarray:
+    """Return profile vectors scaled to unit length, as `float32` rows.
+
+    With unit rows, the dot product of two rows is their cosine similarity, so
+    network generation computes similarities with one matrix product. A zero
+    vector stays zero: its cosine with every user is 0.
+
+    Parameters:
+        vectors (Any): Array-like of shape `(n, dim)`, `dim > 0`, one profile
+            vector per row.
+
+    Returns:
+        np.ndarray: `float32` array of shape `(n, dim)` with unit-length rows
+        (zero rows unchanged).
+
+    Raises:
+        ValueError: If the input is not two-dimensional, has no columns, or
+            contains values that are not finite.
+
+    Example:
+        >>> _unit_rows([[3.0, 4.0], [0.0, 0.0]])
+        array([[0.6, 0.8],
+               [0. , 0. ]], dtype=float32)
+    """
+    rows = np.asarray(vectors, dtype=np.float64)
+    if rows.ndim != 2 or rows.shape[1] == 0 or not np.all(np.isfinite(rows)):
+        raise ValueError(
+            "vector_profile rows must be non-empty, finite and of equal size"
+        )
+    norms = np.linalg.norm(rows, axis=1, keepdims=True)
+    return (rows / np.where(norms > 0.0, norms, 1.0)).astype(np.float32)
+
+
+def _profile_rows_from_users(users: list[UserRecord]) -> np.ndarray:
+    """Return unit-length profile rows indexed by `user_id - 1`.
+
+    Used by `_build_synthetic_follower_network`, the materialized path for
+    tests and small direct callers; the streaming path stores rows through
+    `CompactUserPopulation.store_profiles` instead.
+
+    Parameters:
+        users (list[UserRecord]): Users with their `vector_profile`.
+
+    Returns:
+        np.ndarray: `float32` array of shape `(max user_id, dim)`; rows of
+        user IDs that are not in `users` stay zero.
+
+    Raises:
+        ValueError: If the profile vectors do not all have the same size, or
+            one is empty or not finite.
+    """
+    sizes = {len(user.vector_profile) for user in users}
+    if len(sizes) != 1:
+        raise ValueError(
+            f"every vector_profile must have the same size, got {sorted(sizes)}"
+        )
+    rows = np.zeros(
+        (max(user.user_id for user in users), sizes.pop()),
+        dtype=np.float32,
+    )
+    rows[[user.user_id - 1 for user in users]] = _unit_rows(
+        [user.vector_profile for user in users]
+    )
+    return rows
 
 
 def _config_items(value: Any):
