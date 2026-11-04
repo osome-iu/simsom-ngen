@@ -12,6 +12,7 @@ import {
   edgesCsv,
   exportBaseName,
   nodesCsv,
+  simulationOutcomeLabel,
 } from "./reportExports.js";
 
 const REFRESH_INTERVAL_MS = 5000;
@@ -189,26 +190,41 @@ function App() {
   const runtime = properties.runtime || {};
   const policy = properties.policy_stats || {};
   const network = properties.network_stats || {};
-  const timing = properties.timing?.inter_activity_ms || {};
+  const actionMix = properties.action_type_ratios || {};
   const avgActionsPerUser = properties.avg_actions_per_user ?? (
     latest?.userCount ? latest.actionCount / latest.userCount : null
   );
   const isRunning = run.status === "running" || run.status === "stopping";
-  const runStartedAt = Date.parse(run.startedAt || "");
-  const lifecycleStartedAt = Date.parse(results.lifecycle?.startedAt || "");
-  // The database can retain results from an earlier run. Do not expose its
-  // clock value until analytics confirms that a snapshot belongs to the run
-  // currently owned by this dashboard process.
-  const hasCurrentRunSnapshot = Boolean(
-    run.id
-    && latest
-    && Number.isFinite(runStartedAt)
-    && Number.isFinite(lifecycleStartedAt)
-    && lifecycleStartedAt >= runStartedAt
-  );
-  const simulatedClockTimestamp = hasCurrentRunSnapshot
-    ? results.currentSimulatorTimestampMs ?? latest.simulatorTimestampMs
-    : null;
+  const isRunning = run.status === "running" || run.status === "stopping";
+
+const runStartedAt = Date.parse(run.startedAt || "");
+const lifecycleStartedAt = Date.parse(results.lifecycle?.startedAt || "");
+
+// The database can retain results from an earlier run. Do not expose its
+// clock value until analytics confirms that a snapshot belongs to the run
+// currently owned by this dashboard process.
+const hasCurrentRunSnapshot = Boolean(
+  run.id
+  && latest
+  && Number.isFinite(runStartedAt)
+  && Number.isFinite(lifecycleStartedAt)
+  && lifecycleStartedAt >= runStartedAt
+);
+
+const simulatedClockTimestamp = hasCurrentRunSnapshot
+  ? results.currentSimulatorTimestampMs ?? latest.simulatorTimestampMs
+  : null;
+
+const convergenceStatus = simulationOutcomeLabel({
+  hasAnalytics: Boolean(latest),
+  converged: latest?.converged,
+  shouldTerminate: results.lifecycle?.shouldTerminate,
+  runStatus: run.status,
+});
+
+const convergenceReason = latest?.convergenceReason
+  || results.lifecycle?.analyticsStopReason
+  || results.lifecycle?.reason;
 
   const statusCopy = useMemo(() => ({
     idle: "Ready",
@@ -355,8 +371,8 @@ function App() {
                 <div className="convergence-row">
                   <span className={`convergence-mark ${latest?.converged ? "is-converged" : ""}`} />
                   <div>
-                    <strong>{latest ? (latest.converged ? "Converged" : "Still evolving") : "Not evaluated"}</strong>
-                    <p>{latest?.convergenceReason || results.lifecycle?.analyticsStopReason || (latest ? "No convergence reason reported." : "Convergence details will appear with the analytics.")}</p>
+                    <strong>{convergenceStatus}</strong>
+                    <p>{convergenceReason || (latest ? "No convergence reason reported." : "Convergence details will appear with the analytics.")}</p>
                   </div>
                 </div>
               </Panel>
@@ -366,7 +382,7 @@ function App() {
               <summary>
                 <span>
                   <strong>Additional run analytics</strong>
-                  <small>Quality, policy, runtime, network, and timing statistics</small>
+                  <small>Quality, policy, runtime, network, and behavior statistics</small>
                 </span>
               </summary>
               <div className="additional-analytics-grid">
@@ -385,8 +401,8 @@ function App() {
                   ]} />
                 </Panel>
 
-                <Panel className="timing-panel" kicker="Simulated milliseconds" title="Inter-activity timing">
-                  <TimingBars values={timing} />
+                <Panel kicker="Behavior mix" title="Interaction types">
+                  <ActionDonut values={actionMix} />
                 </Panel>
               </div>
             </details>
@@ -1136,18 +1152,39 @@ function StatList({ rows }) {
   return <dl className="stat-list">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
 }
 
-function TimingBars({ values }) {
-  const entries = ["min", "p50", "mean", "p90", "p99", "max"].map((key) => [key, values[key]]);
-  const max = Math.max(...entries.map(([, value]) => Number(value) || 0), 1);
+function ActionDonut({ values }) {
+  // Use the network legend colors so each action type has one visual identity
+  // throughout the dashboard, while text labels carry the same information.
+  const entries = Object.entries(values).map(([label, value]) => ({
+    label,
+    value: Number(value),
+    color: NETWORK_ACTION_COLORS[label] || "#8d9aaa",
+  })).filter((entry) => Number.isFinite(entry.value));
+  let cursor = 0;
+  const stops = entries.map((entry) => {
+    const start = cursor;
+    cursor += entry.value * 100;
+    return `${entry.color} ${start}% ${cursor}%`;
+  });
+
+  if (!entries.length) {
+    return <p className="muted-copy">Interaction types will appear after the first analytics snapshot.</p>;
+  }
+
   return (
-    <div className="timing-bars">
-      {entries.map(([label, value]) => (
-        <div key={label}>
-          <span>{label}</span>
-          <i><b style={{ width: `${((Number(value) || 0) / max) * 100}%` }} /></i>
-          <strong>{value === null || value === undefined ? "—" : `${number(value, 1)} ms`}</strong>
-        </div>
-      ))}
+    <div className="donut-layout">
+      <div className="donut" style={{ background: `conic-gradient(${stops.join(", ")})` }}>
+        <div><strong>{entries.length}</strong><span>interaction types</span></div>
+      </div>
+      <div className="legend">
+        {entries.map((entry) => (
+          <div key={entry.label}>
+            <i style={{ backgroundColor: entry.color }} />
+            <span>{entry.label}</span>
+            <strong>{percent(entry.value)}</strong>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

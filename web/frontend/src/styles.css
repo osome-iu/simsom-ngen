@@ -277,12 +277,17 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .stat-list dt { color: #8996a4; font-size: 0.82rem; }
 .stat-list dd { margin: 0; font-weight: 700; }
 
-.timing-bars { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 15px 12px; }
-.timing-bars > div { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; }
-.timing-bars span { color: #788694; font-size: 0.72rem; text-transform: uppercase; }
-.timing-bars i { height: 7px; overflow: hidden; border-radius: 5px; background: rgba(255,255,255,0.06); }
-.timing-bars b { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: linear-gradient(90deg, var(--blue), #b58cf5); }
-.timing-bars strong { text-align: right; font-size: 0.76rem; }
+.donut-layout { display: flex; flex-direction: column; align-items: center; gap: 25px; }
+.donut { width: 162px; height: 162px; display: grid; place-items: center; border-radius: 50%; }
+.donut > div { width: 106px; height: 106px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 50%; background: #121c2b; }
+.donut strong { font-size: 1.8rem; }
+.donut span { color: var(--muted); font-size: 0.7rem; }
+.legend { width: 100%; display: grid; gap: 10px; }
+.legend > div { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 9px; font-size: 0.82rem; }
+.legend i { width: 7px; height: 7px; border-radius: 50%; }
+.legend span { color: #abb6c0; text-transform: capitalize; }
+.legend strong { color: #dde4e9; }
+.muted-copy { color: var(--muted); line-height: 1.6; }
 @keyframes pulse { 50% { opacity: 0.45; } }
 @keyframes reveal { from { opacity: 0; transform: translateY(-8px); } }
 
