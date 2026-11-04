@@ -78,6 +78,22 @@ export function downloadTextFile(filename, contents, mimeType) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+export function simulationOutcomeLabel({
+  hasAnalytics,
+  converged,
+  shouldTerminate,
+  runStatus,
+}) {
+  if (!hasAnalytics) return "Not evaluated";
+  if (converged) return "Converged";
+  if (runStatus === "failed") return "Run failed";
+  if (runStatus === "stopping" || (shouldTerminate && runStatus === "running")) {
+    return "Stopping";
+  }
+  if (shouldTerminate || runStatus === "completed") return "Stopped";
+  return "Still evolving";
+}
+
 export function buildHtmlReport(bundle) {
   const series = bundle.analytics?.series || [];
   const latest = series.at(-1) || {};
@@ -110,11 +126,12 @@ export function buildHtmlReport(bundle) {
     || lifecycle.analyticsConvergenceReason
     || lifecycle.analyticsStopReason
     || lifecycle.reason;
-  const convergenceStatus = !series.length
-    ? "Not evaluated"
-    : latest.converged
-      ? "Converged"
-      : "Still evolving";
+  const convergenceStatus = simulationOutcomeLabel({
+    hasAnalytics: Boolean(series.length),
+    converged: latest.converged,
+    shouldTerminate: lifecycle.shouldTerminate,
+    runStatus: bundle.run?.status,
+  });
 
   const summaryCards = [
     ["Users", formatNumber(networkMeta.userCount ?? latest.userCount ?? nodes.length)],
