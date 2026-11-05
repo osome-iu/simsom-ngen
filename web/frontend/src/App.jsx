@@ -195,7 +195,6 @@ function App() {
     latest?.userCount ? latest.actionCount / latest.userCount : null
   );
   const isRunning = run.status === "running" || run.status === "stopping";
-  const isRunning = run.status === "running" || run.status === "stopping";
 
 const runStartedAt = Date.parse(run.startedAt || "");
 const lifecycleStartedAt = Date.parse(results.lifecycle?.startedAt || "");
