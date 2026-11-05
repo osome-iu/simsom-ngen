@@ -42,6 +42,10 @@ USER_PROFILE_CHUNK_SIZE = 100_000
 COMPACT_ARRAY_MEMORY_LIMIT_BYTES = 256 * 1024 * 1024
 COMPACT_ARRAY_BUILD_CHUNK_SIZE = 1_000_000
 MAX_SUPPORTED_USERS = MAX_INTEGER_USER_ID
+# Earlier users scored per arriving user by `homophilic_random_walk`; keeps the
+# cost per user independent of the number of users. See
+# docs/algorithms/controller.md#homophilic_random_walk for how it was chosen.
+HOMOPHILY_CANDIDATE_SAMPLE_SIZE = 1_000
 
 
 @dataclass(frozen=True)
@@ -1299,8 +1303,14 @@ class DefaultSetupDbPlanner:
         1. Start with a fully connected directed group of `seed_size` users.
         2. For every later user, choose one earlier user uniformly.
         3. For each remaining link, independently choose either a neighbor of
-           the first selected user or another earlier user uniformly.
+           the first selected user or another earlier user.
         4. Sample without replacement when multiple choices are available.
+
+        The "another earlier user" links are uniform when `alpha` is 0, the
+        `random_walk` rule. When `alpha` is positive, they prefer users with a
+        similar profile, with weight `(1 + cos) ** alpha`; see
+        `_sample_similar_indexes` and
+        docs/algorithms/controller.md#homophilic_random_walk.
 
         Parameters:
             seed_size: Number of users in the initial fully connected seed. It
@@ -1308,6 +1318,12 @@ class DefaultSetupDbPlanner:
             avg_n_friend: Number of outgoing links created for each new user.
             probability_follow: Chance that each remaining link follows one of
                 the selected user's outgoing links.
+            alpha: Optional, 0 when absent. Strength of the preference for
+                similar profiles in the links that are not closures. A
+                positive value requires `state.profiles`.
+
+        Raises:
+            RuntimeError: If `alpha` is positive and `state.profiles` is None.
         """
         source_users = _user_id_sequence(users_by_type.get(source_user_type, ()))
         seed_size = _require_positive_int(
@@ -1324,6 +1340,9 @@ class DefaultSetupDbPlanner:
             _config_value(parameters, "probability_follow"),
             "probability_follow",
         )
+        alpha = _require_non_negative_number(parameters.get("alpha", 0.0), "alpha")
+        if alpha > 0.0 and state.profiles is None:
+            raise RuntimeError("profile-weighted generation requires user profiles")
         if len(source_users) < 2: # can't self-link
             return
 
@@ -1401,12 +1420,22 @@ class DefaultSetupDbPlanner:
                         selected_targets.append((target_index, target_id))
 
                 random_count = remaining_count - len(selected_targets)
-                if random_count:
+                if random_count and alpha > 0.0:
+                    random_indexes = self._sample_similar_indexes(
+                        source_users,
+                        source_index,
+                        random_count,
+                        selected_target_indexes,
+                        state.profiles,
+                        alpha,
+                    )
+                elif random_count:
                     random_indexes = self._sample_available_indexes(
                         source_index,
                         random_count,
                         selected_target_indexes,
                     )
+                if random_count:
                     selected_targets.extend(
                         (target_index, int(source_users[target_index]))
                         for target_index in random_indexes
@@ -1453,6 +1482,75 @@ class DefaultSetupDbPlanner:
                 "seed_size": seed_size,
                 "avg_n_friend": avg_n_friend,
                 "probability_follow": probability_follow,
+            },
+            state=state,
+            progress=progress,
+        )
+
+    @edge_generation_function(
+        "homophilic_random_walk",
+        phases=(WITHIN_TYPE_NETWORKING_PHASE,),
+        requires_profiles=True,
+    )
+    def _generate_homophilic_random_walk(
+        self,
+        *,
+        source_user_type: str,
+        users_by_type: dict[str, Sequence[int]],
+        state: _NetworkGenerationState,
+        seed_size: int,
+        avg_n_friend: int,
+        probability_follow: float,
+        alpha: float,
+        progress: Callable[[int], None] | None = None,
+    ) -> Iterator[FollowerNetworkRecord]:
+        """Run `random_walk` with links that prefer users with similar profiles.
+
+        Config-visible within-type function. Same seed, first target and
+        closure step as `random_walk`; the links that are not closures are
+        drawn with weight `(1 + cos) ** alpha`, where `cos` is the cosine
+        similarity of the two users' `vector_profile`. `alpha = 0` reproduces
+        `random_walk` exactly for the same random state. Declares
+        `requires_profiles=True`, so setup keeps one unit-length profile row
+        per user in `state.profiles`.
+
+        See docs/algorithms/controller.md#homophilic_random_walk.
+
+        Parameters:
+            source_user_type (str): User type whose users get links.
+            users_by_type (dict[str, Sequence[int]]): User IDs of each type,
+                in ascending order.
+            state (_NetworkGenerationState): Shared generation state; its
+                `profiles` must be set.
+            seed_size (int): Users in the initial fully connected seed; at
+                least `avg_n_friend`.
+            avg_n_friend (int): Outgoing links created by each post-seed user.
+            probability_follow (float): Chance that each remaining link is a
+                closure through the first target's outgoing links.
+            alpha (float): Non-negative strength of the preference for
+                similar profiles.
+            progress (Callable[[int], None] | None): Optional progress callback.
+
+        Returns:
+            Iterator[FollowerNetworkRecord]: One-pass stream of directed links.
+
+        Raises:
+            ValueError: If an input is out of range, for example a negative
+                `alpha` or `seed_size < avg_n_friend`.
+
+        Example:
+            Configuration of one user type:
+            `{"homophilic_random_walk": {"seed_size": 62, "avg_n_friend": 62,
+            "probability_follow": 0.35, "alpha": 8}}`
+        """
+        return self._generate_random_walk_edges(
+            source_user_type=source_user_type,
+            users_by_type=users_by_type,
+            parameters={
+                "seed_size": seed_size,
+                "avg_n_friend": avg_n_friend,
+                "probability_follow": probability_follow,
+                "alpha": alpha,
             },
             state=state,
             progress=progress,
@@ -1786,6 +1884,91 @@ class DefaultSetupDbPlanner:
                 if len(selected) == sample_count:
                     break
         return selected
+
+    @staticmethod
+    def _sample_similar_indexes(
+        source_users: Sequence[int],
+        source_index: int,
+        count: int,
+        blocked_indexes: set[int],
+        profiles: np.ndarray,
+        alpha: float,
+    ) -> list[int]:
+        """Sample distinct earlier positions, preferring similar profiles.
+
+        Used by `_generate_random_walk_edges` for the links that are not
+        closures when `alpha` is positive. Implements step 6 of
+        docs/algorithms/controller.md#homophilic_random_walk.
+
+        Candidates are the earlier positions `0..source_index-1` that are not
+        blocked. When there are more than
+        `max(HOMOPHILY_CANDIDATE_SAMPLE_SIZE, count)` of them, a uniform
+        subset of that size is scored instead of all of them. Each scored
+        candidate gets the weight `(1 + cos) ** alpha`, and `count` of them
+        are drawn without replacement with probability proportional to the
+        weights (Efraimidis and Spirakis, 2006: one exponential key per
+        candidate divided by its weight, keep the smallest keys; the weights
+        are never normalized). Keys are compared as logarithms,
+        `log(key) - alpha * log(1 + cos)`, so a large `alpha` cannot overflow
+        or underflow the weights. If fewer scored candidates than `count` have
+        a positive weight, the draw is uniform among the scored candidates.
+
+        Parameters:
+            source_users (Sequence[int]): User IDs of the source type, by
+                local position.
+            source_index (int): Local position of the user getting links.
+            count (int): Number of positions to draw.
+            blocked_indexes (set[int]): Positions already selected by this
+                user; never drawn.
+            profiles (np.ndarray): Unit-length profile rows indexed by
+                `user_id - 1`.
+            alpha (float): Positive strength of the preference.
+
+        Returns:
+            list[int]: Distinct local positions, at most `count`, all lower
+            than `source_index` and not blocked.
+
+        Example:
+            >>> DefaultSetupDbPlanner._sample_similar_indexes(
+            ...     range(1, 101), 50, 3, {0}, profiles, 8.0)
+            [12, 31, 7]
+        """
+        blocked = np.fromiter(
+            (index for index in blocked_indexes if index < source_index),
+            dtype=np.int64,
+        )
+        available_count = source_index - len(blocked)
+        subset_size = max(HOMOPHILY_CANDIDATE_SAMPLE_SIZE, count)
+        if available_count <= subset_size:
+            candidates = np.setdiff1d(
+                np.arange(source_index, dtype=np.int64),
+                blocked,
+                assume_unique=True,
+            )
+        else:
+            candidates = _uniform_subset(source_index, subset_size, blocked)
+        if count >= len(candidates):
+            return candidates.tolist()
+
+        # Profile rows are unit length, so one dot product is the cosine.
+        candidate_rows = _user_ids_at(source_users, candidates) - 1
+        source_row = int(source_users[source_index]) - 1
+        cosines = np.clip(
+            (profiles[candidate_rows] @ profiles[source_row]).astype(np.float64),
+            -1.0,
+            1.0,
+        )
+        positive = cosines > -1.0  # weight (1 + cos) ** alpha > 0
+        if np.count_nonzero(positive) < count:
+            chosen = np.random.choice(len(candidates), size=count, replace=False)
+            return candidates[chosen].tolist()
+        log_keys = np.full(len(candidates), np.inf)
+        log_keys[positive] = (
+            np.log(np.random.exponential(size=int(np.count_nonzero(positive))))
+            - alpha * np.log1p(cosines[positive])
+        )
+        chosen = np.argpartition(log_keys, count - 1)[:count]
+        return candidates[chosen].tolist()
 
     @staticmethod
     def _target_edge_count(candidate_count: int, parameters: dict[str, Any]) -> int:
@@ -2366,6 +2549,86 @@ def _unit_rows(vectors: Any) -> np.ndarray:
         )
     norms = np.linalg.norm(rows, axis=1, keepdims=True)
     return (rows / np.where(norms > 0.0, norms, 1.0)).astype(np.float32)
+
+
+def _uniform_subset(
+    population_size: int,
+    size: int,
+    blocked: np.ndarray,
+) -> np.ndarray:
+    """Return `size` distinct unblocked indexes from `0..population_size-1`.
+
+    Used by `DefaultSetupDbPlanner._sample_similar_indexes` to pick the
+    candidates it scores. Every subset of `size` unblocked indexes is equally
+    likely. When the population is less than twice `size`, the unblocked
+    indexes are listed and shuffled. Otherwise indexes are drawn with
+    replacement in one vectorized call, sorted so that duplicates and blocked
+    indexes can be dropped, topped up until at least `size` remain, and a
+    random `size` of them is kept; the cost is `O(size log size)`, independent
+    of `population_size`.
+
+    Parameters:
+        population_size (int): Number of indexes to choose from.
+        size (int): Number of indexes to return. The caller guarantees that
+            more than `size` unblocked indexes exist.
+        blocked (np.ndarray): Distinct `int64` indexes that must not be
+            returned.
+
+    Returns:
+        np.ndarray: `int64` array of `size` distinct unblocked indexes, in
+        random order.
+
+    Example:
+        >>> _uniform_subset(10, 3, np.array([0, 1]))
+        array([7, 2, 5])
+    """
+    blocked = np.sort(np.asarray(blocked, dtype=np.int64))
+    if population_size < 2 * size:
+        available = np.setdiff1d(
+            np.arange(population_size, dtype=np.int64),
+            blocked,
+            assume_unique=True,
+        )
+        return np.random.permutation(available)[:size]
+    chosen = np.empty(0, dtype=np.int64)
+    while len(chosen) < size:
+        draws = np.random.randint(
+            0,
+            population_size,
+            size=size - len(chosen) + len(blocked) + 16,
+        )
+        merged = np.sort(np.concatenate([chosen, draws]))
+        merged = merged[np.r_[True, merged[1:] != merged[:-1]]]
+        positions = np.searchsorted(merged, blocked)
+        inside = positions < len(merged)
+        positions = positions[inside]
+        hits = positions[merged[positions] == blocked[inside]]
+        chosen = np.delete(merged, hits)
+    return np.random.permutation(chosen)[:size]
+
+
+def _user_ids_at(user_ids: Sequence[int], indexes: np.ndarray) -> np.ndarray:
+    """Return the user IDs at local positions `indexes` as `int64`.
+
+    Works for the three compact ID sequences used by network generation: a
+    `range`, a NumPy array, or a plain list.
+
+    Parameters:
+        user_ids (Sequence[int]): User IDs of one type, by local position.
+        indexes (np.ndarray): `int64` local positions.
+
+    Returns:
+        np.ndarray: `int64` user IDs, one per position.
+
+    Example:
+        >>> _user_ids_at(range(5, 10), np.array([0, 3]))
+        array([5, 8])
+    """
+    if isinstance(user_ids, range):
+        return user_ids.start + indexes * user_ids.step
+    if isinstance(user_ids, np.ndarray):
+        return user_ids[indexes].astype(np.int64)
+    return np.fromiter((user_ids[int(index)] for index in indexes), dtype=np.int64)
 
 
 def _profile_rows_from_users(users: list[UserRecord]) -> np.ndarray:

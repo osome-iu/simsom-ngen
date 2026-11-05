@@ -37,6 +37,7 @@ NETWORK_INPUTS = {
     'no_edges': {},
     'density_uniform_sparse': {'density': 1.0},
     'random_walk': {'seed_size': 2, 'avg_n_friend': 2, 'probability_follow': 0.8},
+    'homophilic_random_walk': {'seed_size': 2, 'avg_n_friend': 2, 'probability_follow': 0.8, 'alpha': 2.0},
     'power_law_by_followers_sparse': {'density': 1.0, 'power_law_exponent': 2.0},
 }
 ACTIVITY_INPUTS = {'power_law_activity': {
@@ -127,7 +128,9 @@ class ConfigurableFunctionTests(unittest.TestCase):
         self.assertAlmostEqual(math.hypot(*embedding), math.hypot(*profile))
 
     def test_every_network_function_executes_with_nondefault_inputs(self):
-        for within, within_count in [('no_edges', 0), ('density_uniform_sparse', 60), ('random_walk', 20)]:
+        for within, within_count in [
+            ('no_edges', 0), ('density_uniform_sparse', 60), ('random_walk', 20), ('homophilic_random_walk', 20),
+        ]:
             for cross, cross_count in [('no_edges', 0), ('power_law_by_followers_sparse', 72)]:
                 with self.subTest(within=within, cross=cross):
                     config = configuration()
