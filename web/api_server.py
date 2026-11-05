@@ -736,10 +736,11 @@ class AnalyticsRepository:
         """Return users and weighted interaction edges in Helios-friendly rows.
 
         Repeated actions with the same actor, parent author, and action type are
-        represented by one weighted edge. Node weighted degree and edge counts
-        are calculated from the (possibly limited or k-core-filtered)
-        interactions returned by this snapshot, so the visual measures always
-        describe the shown graph.
+        represented by one weighted edge whose ``interactions`` array retains
+        the individual action details. Node weighted degree and edge counts are
+        calculated from the (possibly limited or k-core-filtered) interactions
+        returned by this snapshot, so the visual measures always describe the
+        shown graph.
         """
         if isinstance(edge_limit, bool) or not isinstance(edge_limit, int):
             raise ValueError("edgeLimit must be an integer")
@@ -1167,27 +1168,51 @@ class AnalyticsRepository:
             WINDOW interaction_group AS (
                 PARTITION BY source, target, "actionType"
             )
+        ), interaction_details AS MATERIALIZED (
+            SELECT
+                "groupId",
+                json_agg(
+                    json_build_object(
+                        'id', id,
+                        'timestamp', timestamp,
+                        'contentActionId', "contentActionId",
+                        'quality', quality,
+                        'appeal', appeal,
+                        'contentEmbeddingDimensions', "contentEmbeddingDimensions",
+                        'contentViewCount', "contentViewCount",
+                        'contentRepeatActorCount', "contentRepeatActorCount",
+                        'moderationActions', "moderationActions",
+                        'contentModerationActions', "contentModerationActions",
+                        'parentActionId', "parentActionId"
+                    ) ORDER BY id DESC
+                ) AS interactions
+            FROM ranked_interactions
+            GROUP BY "groupId"
         ), grouped_interactions AS MATERIALIZED (
             -- Keep the newest row's detail fields while using the oldest action
             -- ID as a stable identity as additional matching actions arrive.
+            -- Individual details remain available for inspection in the UI.
             SELECT
-                "groupId" AS id,
-                source,
-                target,
-                "actionType",
-                "interactionCount",
-                timestamp,
-                "contentActionId",
-                quality,
-                appeal,
-                "contentEmbeddingDimensions",
-                "contentViewCount",
-                "contentRepeatActorCount",
-                "moderationActions",
-                "contentModerationActions",
-                "parentActionId"
-            FROM ranked_interactions
-            WHERE representative_rank = 1
+                ranked."groupId" AS id,
+                ranked.source,
+                ranked.target,
+                ranked."actionType",
+                ranked."interactionCount",
+                ranked.timestamp,
+                ranked."contentActionId",
+                ranked.quality,
+                ranked.appeal,
+                ranked."contentEmbeddingDimensions",
+                ranked."contentViewCount",
+                ranked."contentRepeatActorCount",
+                ranked."moderationActions",
+                ranked."contentModerationActions",
+                ranked."parentActionId",
+                details.interactions
+            FROM ranked_interactions AS ranked
+            JOIN interaction_details AS details
+                ON details."groupId" = ranked."groupId"
+            WHERE ranked.representative_rank = 1
         ), node_strengths AS MATERIALIZED (
             -- Directed weighted degree is incoming plus outgoing interaction
             -- frequencies. A self-interaction therefore contributes two, as
