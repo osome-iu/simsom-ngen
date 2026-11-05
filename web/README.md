@@ -16,11 +16,7 @@ post. Original posts (root posts with no parent) have no second user endpoint,
 so the panel reports them as a separate count instead of drawing synthetic
 edges.
 
-The graph uses a spread-out GPU force layout. Its on-canvas controls adjust the
-Helios link-distance, node-size, and edge-width parameters without rebuilding
-the network. Interaction-type checkboxes hide selected edge categories and
-de-emphasize nodes that are no longer connected by a visible interaction.
-Selecting a visible node or edge opens a modal with its user-facing details.
+The graph uses a spread-out GPU force layout. Node size maps the full logarithmic range of weighted degree (the sum of incoming and outgoing interaction frequencies) into a bounded visual size range. Repeated interactions with the same actor, parent author, and action type are represented by one weighted edge whose width increases logarithmically with its interaction frequency; likes, reposts, replies, and quotes remain separate color categories. Its on-canvas controls adjust the Helios link-distance, node-size, and edge-width parameters without rebuilding the network. Interaction-type checkboxes hide selected edge categories and de-emphasize nodes that are no longer connected by a visible interaction. Selecting a visible node or edge opens a modal with its user-facing details.
 
 The results dashboard places the network beside a digital and analog simulated
 clock and an average content quality timeline plotted over simulated time. The
@@ -159,12 +155,7 @@ before starting the API with `SIMSOM_DATABASE_DSN` and
 executable when more than one PostgreSQL installation is present. If the API is
 running on another address, set `SIMSOM_API_PROXY` when starting Vite.
 
-The network endpoint returns at most 50,000 nodes and 100,000 interaction edges
-to keep the browser renderer responsive. When the full network exceeds either
-limit, the endpoint uses `python-igraph` to select the lowest k-core level that
-fits both limits and reports the level used. PostgreSQL streams the endpoint
-pairs to a temporary file, so the API does not build a multi-million-edge JSON
-object before filtering. Smaller networks are returned without filtering.
+The network endpoint returns at most 50,000 nodes and 100,000 interactions to keep the browser renderer responsive. When the full network exceeds either limit, the endpoint uses `python-igraph` to select the lowest k-core level that fits both limits and reports the level used. PostgreSQL streams the endpoint pairs to a temporary file, so the API does not build a multi-million-edge JSON object before filtering. Returned interactions are then represented as weighted edges by source user, target user, and interaction type. Smaller networks are returned without filtering.
 Helios requires a modern browser with WebGPU or WebGL2 support.
 
 Choose **Advanced configuration** in the launch card to create a run-specific
