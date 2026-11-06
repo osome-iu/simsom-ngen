@@ -134,9 +134,9 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .export-menu summary:hover, .export-menu[open] summary { color: #eef4f1; border-color: rgba(86,180,233,0.38); background: rgba(86,180,233,0.1); }
 .export-menu.is-disabled summary { opacity: 0.42; cursor: not-allowed; }
 .export-menu-popover { position: absolute; top: calc(100% + 8px); right: 0; width: min(340px, calc(100vw - 32px)); padding: 7px; border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; background: rgba(10,17,29,0.98); box-shadow: 0 20px 55px rgba(0,0,0,0.42); backdrop-filter: blur(18px); }
-.export-menu-popover button { width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 11px 12px; color: #dce5eb; border: 0; border-radius: 8px; background: transparent; text-align: left; }
-.export-menu-popover button:hover:not(:disabled) { background: rgba(86,180,233,0.08); }
-.export-menu-popover button:disabled { opacity: 0.35; cursor: not-allowed; }
+.export-menu-popover button, .export-menu-popover a { width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 11px 12px; color: #dce5eb; border: 0; border-radius: 8px; background: transparent; text-align: left; text-decoration: none; }
+.export-menu-popover button:hover:not(:disabled), .export-menu-popover a:hover:not(.is-disabled) { background: rgba(86,180,233,0.08); }
+.export-menu-popover button:disabled, .export-menu-popover a.is-disabled { opacity: 0.35; cursor: not-allowed; }
 .export-menu-popover strong { font-size: 0.77rem; }
 .export-menu-popover span { color: #748493; font-size: 0.66rem; line-height: 1.4; }
 

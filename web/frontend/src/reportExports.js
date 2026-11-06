@@ -63,7 +63,10 @@ export function exportBaseName(bundle) {
     .replace(/\.\d{3}Z$/, "Z")
     .replace(/[^0-9]/g, "")
     .slice(0, 14);
-  return `simsom-${stamp || "export"}`;
+  const formattedStamp = stamp.length === 14
+    ? `${stamp.slice(0, 8)}_${stamp.slice(8)}`
+    : stamp;
+  return `simsom-${formattedStamp || "export"}`;
 }
 
 export function downloadTextFile(filename, contents, mimeType) {
