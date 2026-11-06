@@ -270,6 +270,8 @@ follower-weighted function sees all edges emitted by earlier phases, earlier
 user types, and earlier source users. The follower-count array is not allocated
 when the selected functions do not need it.
 
+When any runnable decorated function declares `requires_profiles=True`, the setup state also holds one `float32` row per initialized user, indexed by `user_id - 1`. The row is the user's `vector_profile` scaled to unit length, so the dot product of two rows is their cosine similarity; a zero vector stays zero. Rows are written while the user stream is sent to PostgreSQL, from the same values stored in `user.vector_profile`, and network generation refuses to start until every row is written. The rows take `4 * dim * N` bytes, use a temporary memory-mapped file above 256 MiB like the other compact arrays, and are not allocated when the selected functions do not read profiles.
+
 Density-based wrappers use the same target-count rule. For `C` valid candidates
 and density `d`, define `x = C * d`. The requested edge count is:
 
@@ -375,6 +377,43 @@ temporary file above 256 MiB. This bounds Python heap use, but the file still
 requires disk space and its operating-system page cache may appear as resident
 memory under monitoring tools.
 
+### `homophilic_random_walk`
+
+This within-type function requires `seed_size`, `avg_n_friend`, `probability_follow`, and `alpha` in configuration. It is `random_walk` with one change: the links that are not closures prefer earlier users whose `vector_profile` is similar to the new user's, instead of being chosen uniformly. It reads whatever profiles the configured `user_behavior.vector_profile_generation_function` produces, of any dimension, so any registered profile generator can be used with it. The shipped default configuration does not use it.
+
+For a new source user `u` and an earlier user `v` of the same type, let `cos` be the cosine similarity of their profile vectors, taken as 0 when either vector is zero. The weight of `v` is:
+
+```text
+w_v = (1 + cos) ** alpha
+```
+
+The weight is 0 for opposite profiles (`cos = -1`), 1 for unrelated profiles (`cos = 0`), and `2 ** alpha` for identical profiles (`cos = 1`). Only ratios between weights matter: a candidate `a` is `((1 + cos_a) / (1 + cos_b)) ** alpha` times as likely as a candidate `b`. `alpha` therefore sets how strongly similar users are preferred. With `alpha = 0` every weight is 1, the function takes the `random_walk` code path, and it produces exactly the same edges as `random_walk` for the same random state.
+
+Steps 1 to 5 and step 7 are the steps of `random_walk`. Step 6 becomes:
+
+6. Let the candidates be the earlier positions `0..i-1` that this source has not selected yet, and let `M = HOMOPHILY_CANDIDATE_SAMPLE_SIZE` (1,000), raised to the number of unfilled link slots if that is larger. If there are at most `M` candidates, score all of them; otherwise score a uniform random subset of `M` candidates. Fill every unfilled link slot by drawing distinct scored candidates with probability proportional to `w_v`. If fewer scored candidates than unfilled slots have a positive weight, draw uniformly among the scored candidates instead.
+
+The weighted draw without replacement gives each scored candidate one key, `Exponential(1) / w_v`, and keeps the candidates with the smallest keys (Efraimidis and Spirakis, 2006). This has the same distribution as drawing one candidate at a time with probability `w_v / sum(remaining weights)`, but it needs one vectorized pass. The weights are never normalized, and keys are compared as logarithms, `log(Exponential(1)) - alpha * log(1 + cos)`, so a large `alpha` cannot overflow or underflow. The edge count is the same as for `random_walk`.
+
+**Candidate subset size.** Scoring every earlier user would make generation quadratic in `N_t`. With the subset, each source scores at most `M` candidates. A subset lowers homophily slightly, most when a user needs many weighted draws, because the most similar candidates in the subset are used first. `M = 1000` is the smallest value on the doubling grid 250, 500, 1000, 2000 for which the calibrated `alpha` is the same as when every earlier user is scored: at `M = 1000` homophily is within 2 percent of the full computation and `alpha = 8` remains the best value, while at `M = 500` the best value would move to 10. This was measured at `avg_n_friend = 62`; with fewer links per user the subset matters less.
+
+**Calibration.** The function was calibrated on a Bluesky network of 10,520 accounts and the follow links among them. Each account's profile is the average of the sentence embeddings (all-MiniLM-L6-v2) of its bio and posts, reduced to 10 dimensions with PCA. The model used the real mean number of follows, `avg_n_friend = 62`. A grid search over `probability_follow` and `alpha` selected `probability_follow = 0.35` and `alpha = 8`. Model values are averages over three random seeds, and the model networks were built by `setup_db.py` itself:
+
+| Network | Average local clustering | Kappa | Homophily |
+| --- | --- | --- | --- |
+| Real Bluesky network | 0.350 | 3.67 | 0.103 |
+| `random_walk` (`alpha = 0`) | 0.039 | 3.46 | 0.000 |
+| `homophilic_random_walk`, `alpha = 1` | 0.040 | 3.50 | 0.027 |
+| `homophilic_random_walk`, `alpha = 8` | 0.057 | 3.60 | 0.101 |
+
+The metrics are computed as follows. Average local clustering is the mean over users of each user's local clustering coefficient, on the undirected graph where reciprocal follows count as one link; users with fewer than two neighbors count as 0. Kappa is `<k^2> / <k>^2` of the in-degree (number of followers); it grows when a few accounts hold many of the followers. Homophily is the Pearson correlation, over all pairs of users, between the cosine similarity of their profiles and an indicator that is 1 when either user follows the other.
+
+With `alpha = 8`, kappa and homophily are both within 2 percent of the real values. `random_walk` gives no homophily, and `alpha = 1` gives about a quarter of the real value. A calibration report will be added under `analyses/`.
+
+**Limits.** The calibrated `alpha` belongs to the profile vectors it was fitted on. Profiles built another way, including the generated `pca_7param_social_media_archive_profile` profiles of the default configuration, have a different spread of similarities and need their own value of `alpha`. Average local clustering stays far below the real value for every `alpha`, because every post-seed user follows exactly `avg_n_friend` accounts, while in the real network many users follow only a few accounts and those users are the most clustered. Reproducing it needs a variable number of follows per user, which is a separate change.
+
+**Cost.** For each post-seed source, scoring costs `O(M * dim)` and drawing the subset costs `O(M log M)`, independent of `N_t`, so generation stays `O(N_t)` for fixed parameters, as for `random_walk`. Measured with 10-dimensional profiles, the similarity adds about 0.3 ms per user, about five minutes per million users: about nine times the `random_walk` time at `avg_n_friend = 3` and about twice the time at `avg_n_friend = 62`. The profile rows take `4 * dim * N` bytes (about 40 GB for one billion users with 10 dimensions), memory-mapped above 256 MiB, in addition to the `random_walk` adjacency matrix.
+
 ### `power_law_by_followers_sparse`
 
 This cross-type function requires `density` and `power_law_exponent` in
@@ -434,6 +473,8 @@ the same initial-state transaction as user loading.
 | Switch to a dense sampling path when rejection would be inefficient | Avoids excessive rejected draws when most candidates are requested or blocked. | Preserves uniform sampling without replacement. |
 | Use a Fenwick tree for follower-weighted targets | Changes repeated `O(C)` normalization into `O(log C)` selection and update operations. | Preserves sequential weighted sampling without replacement. |
 | Allocate follower counts from decorator metadata | Removes an otherwise unnecessary `8 * N` bytes when no selected rule needs incoming degree. | No effect on rules that do not read follower counts. |
+| Keep profile rows only from decorator metadata | Removes an otherwise unnecessary `4 * dim * N` bytes when no selected rule reads profiles; unit-length rows make one dot product a cosine similarity. | No effect on rules that do not read profiles. |
+| Draw the profile candidate subset with replacement, then deduplicate | Replaces a Python loop over candidate draws with sorting `O(M)` values. | Preserves a uniform subset of exactly `M` distinct unblocked positions. |
 | Use temporary memory maps above 256 MiB | Bounds Python heap allocation and permits arrays larger than available process heap. | Values are unchanged; disk I/O and page faults can make execution slower than RAM. |
 | Omit a global synthetic-edge set | Avoids memory proportional to all emitted edges. | Safe for current functions because phase target scopes do not overlap and every per-source sampler is distinct; the database primary key remains the final guard. |
 

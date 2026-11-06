@@ -403,6 +403,7 @@ Controller                 Workers              Policy              Analytics
   `N_t >= 3` users.
 - The random-walk name refers to this one-hop closure through the first target's
   outgoing neighbors; it is not a variable-length multi-hop traversal.
+- `homophilic_random_walk` is an alternative within-type function with the same growth model, whose links that are not closures prefer users with similar profiles; see [`controller.md`](controller.md#homophilic_random_walk).
 - Synthetic generation skips self-links and duplicate directed links.
 - File import rejects self-links, unknown user IDs, and duplicate directed
   links.

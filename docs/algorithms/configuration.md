@@ -82,6 +82,7 @@ configs using them must migrate to their named-function input objects.
 | Configuration location / function | Required inputs | Explanation and evidence |
 |---|---|---|
 | `edge_generation.within_type_networking_function.random_walk` | `seed_size`, `avg_n_friend`, `probability_follow` | [Random-walk algorithm](controller.md#random_walk). Defaults 3, 3 and 0.5 are model choices; no empirical calibration is recorded for these values. |
+| `edge_generation.within_type_networking_function.homophilic_random_walk` | `seed_size`, `avg_n_friend`, `probability_follow`, `alpha` | [Homophilic random-walk algorithm](controller.md#homophilic_random_walk). Not used by the default configuration. `probability_follow = 0.35` and `alpha = 8` (with `avg_n_friend = 62`) were calibrated on a Bluesky network with profiles built as described there; other profile vectors need their own `alpha`. |
 | `edge_generation.within_type_networking_function.density_uniform_sparse` | `density` | [Uniform network algorithm](controller.md#density_uniform_sparse). The historical 0.0003 preset is uncalibrated. |
 | `edge_generation.cross_type_networking_function.power_law_by_followers_sparse` | `density`, `power_law_exponent` | [Cross-type algorithm](controller.md#power_law_by_followers_sparse). The historical 0.0003 and 1.0 presets are uncalibrated. |
 | Either network phase: `no_edges` | None | [No-edge algorithm](controller.md#no_edges); deterministic, no calibration needed. |
