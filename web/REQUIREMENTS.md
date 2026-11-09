@@ -140,7 +140,7 @@ The current prototype demonstrates these first-pass summary outputs:
 | Run outcome and reason | Status beneath the timeline | Distinguishes evolving, converged, stopped, and failed runs and explains why the run ended |
 | Policy coverage and intervention ratio | Additional run analytics | Summarizes policy processing and action |
 | Software and simulated runtime | Additional run analytics | Separates compute time from modeled time |
-| Average friends/followers per user | Additional run analytics | Summarizes network structure |
+| Average users followed | Additional run analytics | Summarizes outgoing follower-network links without duplicating the equivalent network-wide follower average |
 | Interaction types | Additional run analytics | Shows each action type as a percentage of simulated activity |
 
 ### 4.3 Time-series and distribution visualizations

@@ -27,6 +27,7 @@ from db.analytics import (  # noqa: E402
 from db.controller import PostgresControllerDatabase, SetupDbDataset  # noqa: E402
 from db.core import DatabaseSettings, FollowerNetworkRecord, UserRecord  # noqa: E402
 from subcomponents.policy_annotations import intervention_rule  # noqa: E402
+from web.api_server import AnalyticsRepository  # noqa: E402
 
 
 class AnalyticsPostgresIntegrationTests(unittest.TestCase):
@@ -212,6 +213,75 @@ class AnalyticsPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(
             snapshot.simulator_timestamp_ms,
             progress.simulator_timestamp_ms,
+        )
+
+    def test_network_groups_edges_and_retains_each_interaction_detail(self):
+        """Weighted edges should expose every interaction and its moderation data."""
+        action_table = self.analytics_db.schema_name("action")
+        self.analytics_db.run_psql(
+            f"""
+            INSERT INTO {action_table} (
+                creator_user_id,
+                timestamp,
+                action_type,
+                moderation_actions,
+                views_by_others_count,
+                other_properties
+            )
+            VALUES
+                (
+                    2,
+                    100,
+                    'post',
+                    '[{{"intervention_type": "removed", "violation_type": "below_quality_threshold", "rule": "below_quality_threshold"}}]'::jsonb,
+                    4,
+                    '{{"quality": 0.2, "appeal": 0.3}}'::jsonb
+                ),
+                (
+                    2,
+                    110,
+                    'post',
+                    '[{{"intervention_type": "reviewed", "violation_type": "manual_review", "rule": "manual_review"}}]'::jsonb,
+                    8,
+                    '{{"quality": 0.8, "appeal": 0.9}}'::jsonb
+                );
+
+            INSERT INTO {action_table} (
+                creator_user_id,
+                timestamp,
+                action_type,
+                parent_action_id
+            )
+            VALUES
+                (1, 120, 'like', 1),
+                (1, 130, 'like', 2);
+            """
+        )
+        repository = AnalyticsRepository()
+        repository.dsn = self.test_db
+        repository.schema = self.schema
+
+        payload = repository.fetch_network(edge_limit=100, node_limit=100)
+
+        self.assertTrue(payload["available"])
+        self.assertEqual(len(payload["edges"]), 1)
+        edge = payload["edges"][0]
+        self.assertEqual(edge["interactionCount"], 2)
+        self.assertEqual(len(edge["interactions"]), 2)
+        self.assertEqual(
+            [interaction["timestamp"] for interaction in edge["interactions"]],
+            [130, 120],
+        )
+        self.assertEqual(
+            [interaction["quality"] for interaction in edge["interactions"]],
+            [0.8, 0.2],
+        )
+        self.assertEqual(
+            [
+                interaction["contentModerationActions"][0]["violation_type"]
+                for interaction in edge["interactions"]
+            ],
+            ["manual_review", "below_quality_threshold"],
         )
 
     def test_policy_stats_use_policy_cursor_coverage(self):

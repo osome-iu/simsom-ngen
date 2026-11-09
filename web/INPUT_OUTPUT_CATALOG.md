@@ -319,7 +319,7 @@ Every snapshot's `other_properties` may contain:
 | `repost_stats.self_repeated_repost_ratio` | Reposts that are both self and repeated divided by reposts |
 | `policy_stats.policy_coverage` | Eligible actions reached by the policy cursor divided by eligible actions in the analytics window |
 | `policy_stats.policy_intervention_ratio` | Intervened cursor-covered actions divided by cursor-covered eligible actions |
-| `network_stats.avg_friends_per_user` | Average outgoing follower-network links |
+| `network_stats.avg_friends_per_user` | Average users followed (outgoing follower-network links) |
 | `network_stats.avg_followers_per_user` | Average incoming follower-network links |
 | `timing.inter_activity_ms.min` | Minimum interval between ordered action timestamps |
 | `timing.inter_activity_ms.mean` | Mean interval |

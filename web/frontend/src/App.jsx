@@ -395,8 +395,7 @@ const convergenceReason = latest?.convergenceReason
                   <StatList rows={[
                     ["Software runtime", duration(runtime.software_runtime_seconds)],
                     ["Simulated runtime", duration(runtime.simulated_runtime_seconds)],
-                    ["Avg. friends / user", number(network.avg_friends_per_user, 2)],
-                    ["Avg. followers / user", number(network.avg_followers_per_user, 2)],
+                    ["Average users followed", number(network.avg_friends_per_user, 2)],
                   ]} />
                 </Panel>
 
@@ -863,7 +862,6 @@ function NetworkDetailModal({ graph, selection, onClose }) {
         <dl className="network-detail-list">
           <Detail label="Activity level" value={number(node.activityLevel, 3)} />
           <Detail label="User quality" value={number(node.quality, 3)} />
-          <Detail label="Weighted degree" value={number(node.weightedDegree)} />
           <Detail label="Outgoing interactions" value={number(outgoingCount)} />
           <Detail label="Incoming interactions" value={number(incomingCount)} />
           <Detail label="Connected users" value={number(neighbors.size)} />
@@ -878,7 +876,9 @@ function NetworkDetailModal({ graph, selection, onClose }) {
   const edge = selection.item;
   const actor = graph.nodes.find((node) => node.id === edge.source);
   const parentAuthor = graph.nodes.find((node) => node.id === edge.target);
-  const moderation = moderationSummary(edge.contentModerationActions);
+  const interactions = Array.isArray(edge.interactions) && edge.interactions.length
+    ? edge.interactions
+    : [edge];
   return (
     <NetworkModalFrame
       titleId="network-detail-title"
@@ -887,19 +887,57 @@ function NetworkDetailModal({ graph, selection, onClose }) {
     >
       <InspectorHeader
         color={NETWORK_ACTION_COLORS[edge.actionType] || "#b7c4ce"}
-        kicker="Selected weighted edge"
+        kicker="Selected edge"
         title={`${edge.actionType.charAt(0).toUpperCase()}${edge.actionType.slice(1)}`}
       />
       <dl className="network-detail-list">
-        <Detail label="Interaction frequency" value={number(edge.interactionCount)} />
         <Detail label="Actor" value={actor?.label || `User ${edge.source}`} />
         <Detail label="Parent author" value={parentAuthor?.label || `User ${edge.target}`} />
-        <Detail label="Latest simulated time" value={simulatedTime(Number(edge.timestamp)) || "—"} />
-        <Detail label="Content quality" value={number(edge.quality, 3)} />
-        <Detail label="Content appeal" value={number(edge.appeal, 3)} />
-        <Detail label="Content views" value={number(edge.contentViewCount)} />
-        <Detail label="Moderation" value={moderation} wide />
+        {interactions.length === 1 && (
+          <>
+            <Detail
+              label="Simulated time"
+              value={simulatedTime(Number(interactions[0].timestamp)) || "—"}
+            />
+            <Detail label="Content quality" value={number(interactions[0].quality, 3)} />
+            <Detail label="Content appeal" value={number(interactions[0].appeal, 3)} />
+            <Detail label="Content views" value={number(interactions[0].contentViewCount)} />
+            <Detail
+              label="Moderation"
+              value={<ModerationDetails actions={interactions[0].contentModerationActions} />}
+              wide
+            />
+          </>
+        )}
       </dl>
+      {interactions.length > 1 && (
+        <section className="network-interactions" aria-labelledby="network-interactions-title">
+          <h5 id="network-interactions-title">
+            <span>Interactions</span>
+            <strong>{number(interactions.length)}</strong>
+          </h5>
+          <ol>
+            {interactions.map((interaction, index) => (
+              <li key={interaction.id ?? index}>
+                <header>
+                  <strong>Interaction {index + 1}</strong>
+                  <span>{simulatedTime(Number(interaction.timestamp)) || "—"}</span>
+                </header>
+                <dl className="network-detail-list">
+                  <Detail label="Content quality" value={number(interaction.quality, 3)} />
+                  <Detail label="Content appeal" value={number(interaction.appeal, 3)} />
+                  <Detail label="Content views" value={number(interaction.contentViewCount)} />
+                  <Detail
+                    label="Moderation"
+                    value={<ModerationDetails actions={interaction.contentModerationActions} />}
+                    wide
+                  />
+                </dl>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
     </NetworkModalFrame>
   );
 }
@@ -941,14 +979,47 @@ function Detail({ label, value, wide = false }) {
   );
 }
 
-function moderationSummary(actions) {
-  if (!actions || typeof actions !== "object") return "None";
-  const intervention = actions.intervention_type;
-  const violation = actions.violation_type;
-  if (intervention) return violation ? `${intervention} · ${violation}` : intervention;
-  if (actions.policy_reviewed === true) return "Reviewed · no intervention";
-  if (actions.policy_reviewed === false) return "Not reviewed";
-  return Object.keys(actions).length ? "Metadata available" : "None";
+function ModerationDetails({ actions }) {
+  const entries = Array.isArray(actions)
+    ? actions
+    : actions && typeof actions === "object"
+      ? [actions]
+      : [];
+  if (!entries.length) return "None";
+  return (
+    <ul className="moderation-details">
+      {entries.map((action, index) => (
+        <li key={index}>{moderationActionSummary(action)}</li>
+      ))}
+    </ul>
+  );
+}
+
+function moderationActionSummary(action) {
+  if (!action || typeof action !== "object") return String(action ?? "None");
+  const details = [];
+  if (action.intervention_type) details.push(formatMetadataText(action.intervention_type));
+  if (action.violation_type) details.push(formatMetadataText(action.violation_type));
+  if (action.policy_reviewed === true) details.push("Reviewed");
+  if (action.policy_reviewed === false) details.push("Not reviewed");
+
+  const recognized = new Set(["intervention_type", "violation_type", "policy_reviewed"]);
+  Object.entries(action).forEach(([key, value]) => {
+    if (recognized.has(key)) return;
+    if (
+      key === "rule"
+      && formatMetadataText(value) === formatMetadataText(action.violation_type)
+    ) return;
+    const displayValue = value && typeof value === "object"
+      ? JSON.stringify(value)
+      : formatMetadataText(value);
+    details.push(`${formatMetadataText(key)}: ${displayValue}`);
+  });
+  return details.length ? details.join(" · ") : "No moderation details";
+}
+
+function formatMetadataText(value) {
+  return String(value ?? "").replace(/[_-]+/g, " ");
 }
 
 function SimulatedClock({ timestamp, isRunning }) {

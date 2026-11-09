@@ -46,6 +46,7 @@ const EDGE_WIDTH_RANGE = [1.1, 3.2];
 const CONNECTED_NETWORK_FRAME_COVERAGE = 0.85;
 const CONNECTED_NETWORK_FRAME_PADDING = 0.02;
 const CAMERA_ZOOM_FACTOR = 1.4;
+const EDGE_CLICK_SEARCH_DIRECTIONS = 8;
 
 function NetworkGraph({ graph, selection, onSelectionChange }) {
   const containerRef = useRef(null);
@@ -56,6 +57,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
   const edgeIndexesRef = useRef(new Map());
   const nodesByIndexRef = useRef(new Map());
   const edgesByIndexRef = useRef(new Map());
+  const hoveredEdgeIndexRef = useRef(null);
   const latestGraphRef = useRef(graph);
   const legendIndexesRef = useRef({ nodes: new Map(), edges: new Map() });
   const linkDistanceRef = useRef(DEFAULT_LINK_DISTANCE);
@@ -73,12 +75,36 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
 
   latestGraphRef.current = graph;
 
+  async function findNearbyVisibleEdge(helios, x, y) {
+    // Helios exposes only single-pixel edge picking. Reuse its already-rendered
+    // index buffer after a miss to give edges a small screen-space click target.
+    const tracker = helios?.indexPickingTracker;
+    if (!tracker?.pick || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const maximumRadius = Math.round(5 + (3 * edgeWidthScaleRef.current));
+    for (let radius = 2; radius <= maximumRadius; radius += 2) {
+      for (let direction = 0; direction < EDGE_CLICK_SEARCH_DIRECTIONS; direction += 1) {
+        const angle = (direction / EDGE_CLICK_SEARCH_DIRECTIONS) * Math.PI * 2;
+        const picked = await tracker.pick(
+          x + (Math.cos(angle) * radius),
+          y + (Math.sin(angle) * radius),
+        );
+        const index = Number(picked?.edge);
+        const edge = edgesByIndexRef.current.get(index);
+        if (edge && !hiddenEdgeTypesRef.current.has(edge.actionType)) {
+          return { index, edge };
+        }
+      }
+    }
+    return null;
+  }
+
   useEffect(() => {
     if (selection) return;
     const helios = heliosRef.current;
     helios?.getBehavior("selection")?.clearSelection();
     helios?.getBehavior("hover")?.clearNodeHover({ silent: true, force: true });
     helios?.getBehavior("hover")?.clearEdgeHover({ silent: true, force: true });
+    hoveredEdgeIndexRef.current = null;
   }, [selection]);
 
   function updateExistingGraph(nextGraph) {
@@ -211,6 +237,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
       edgeIndexesRef.current.clear();
       nodesByIndexRef.current.clear();
       edgesByIndexRef.current.clear();
+      hoveredEdgeIndexRef.current = null;
       filteredNodeIndexesRef.current.clear();
       legendIndexesRef.current = { nodes: new Map(), edges: new Map() };
       graphRef.current = null;
@@ -442,6 +469,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
             }
           }),
           helios.on(EVENTS.NODE_HOVER, ({ detail }) => {
+            if (detail?.state === "in") hoveredEdgeIndexRef.current = null;
             if (
               detail?.state === "in"
               && filteredNodeIndexesRef.current.has(Number(detail.index))
@@ -450,18 +478,37 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
             }
           }),
           helios.on(EVENTS.EDGE_HOVER, ({ detail }) => {
-            const edge = edgesByIndexRef.current.get(Number(detail?.index));
+            const index = Number(detail?.index);
+            const edge = edgesByIndexRef.current.get(index);
             if (
               detail?.state === "in"
               && edge
               && hiddenEdgeTypesRef.current.has(edge.actionType)
             ) {
+              hoveredEdgeIndexRef.current = null;
               helios.getBehavior("hover")?.clearEdgeHover({ silent: true, force: true });
+            } else if (detail?.state === "in" && edge) {
+              hoveredEdgeIndexRef.current = index;
+            } else if (detail?.state === "out" && hoveredEdgeIndexRef.current === index) {
+              hoveredEdgeIndexRef.current = null;
             }
           }),
-          helios.on(EVENTS.GRAPH_CLICK, ({ detail }) => {
+          helios.on(EVENTS.GRAPH_CLICK, async ({ detail }) => {
             if (detail?.kind !== "node" && detail?.kind !== "edge") {
-              onSelectionChange?.(null);
+              const hoveredIndex = hoveredEdgeIndexRef.current;
+              const hoveredEdge = edgesByIndexRef.current.get(hoveredIndex);
+              const nearby = hoveredEdge && !hiddenEdgeTypesRef.current.has(hoveredEdge.actionType)
+                ? { index: hoveredIndex, edge: hoveredEdge }
+                : await findNearbyVisibleEdge(helios, Number(detail?.x), Number(detail?.y));
+              if (nearby && heliosRef.current === helios) {
+                helios.getBehavior("selection")?.selectEdges(
+                  [nearby.index],
+                  { mode: "replace" },
+                );
+                onSelectionChange?.({ kind: "edge", item: nearby.edge });
+              } else if (heliosRef.current === helios) {
+                onSelectionChange?.(null);
+              }
             }
           }),
         );
@@ -607,6 +654,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
     helios?.getBehavior("selection")?.clearSelection();
     helios?.getBehavior("hover")?.clearNodeHover({ silent: true, force: true });
     helios?.getBehavior("hover")?.clearEdgeHover({ silent: true, force: true });
+    hoveredEdgeIndexRef.current = null;
     onSelectionChange?.(null);
     if (!helios || !network || !currentGraph) return;
     writeFilterAttributes(

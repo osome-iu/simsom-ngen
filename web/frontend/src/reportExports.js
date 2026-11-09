@@ -154,8 +154,7 @@ export function buildHtmlReport(bundle) {
     ["Average content quality", formatNumber(latest.avgActionQuality, 3)],
     ["Policy coverage", formatPercent(policy.policy_coverage)],
     ["Intervention ratio", formatPercent(policy.policy_intervention_ratio)],
-    ["Average friends per user", formatNumber(networkStats.avg_friends_per_user, 2)],
-    ["Average followers per user", formatNumber(networkStats.avg_followers_per_user, 2)],
+    ["Average users followed", formatNumber(networkStats.avg_friends_per_user, 2)],
   ];
   const networkRows = [
 

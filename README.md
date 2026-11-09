@@ -396,6 +396,25 @@ Run the unit-test suite from the repository root:
 ./venv/bin/python -m unittest discover -s tests -v
 ```
 
+Three PostgreSQL integration-test classes require a running PostgreSQL server, the `psql`, `createdb`, and `dropdb` clients, and the `simsom_clock` extension. The easiest way to provide those dependencies is Docker Compose:
+
+```bash
+docker compose build database web-api
+docker compose run --rm \
+  -v "$PWD:/workspace" \
+  -w /workspace \
+  --entrypoint python \
+  web-api -m unittest \
+  tests.test_analytics_db_integration \
+  tests.test_policy_db_integration \
+  tests.test_worker_db_integration
+docker compose down
+```
+
+Each integration-test class creates a test database and deletes it after the tests finish. When running the tests outside Docker, use the standard PostgreSQL environment variables (`PGHOST`, `PGPORT`, `PGUSER`, and `PGPASSWORD`) to specify the server and credentials. The tests initially connect to the database named by `SIMSOM_MAINTENANCE_DB`, which defaults to `postgres`, and use that connection to create the test databases. The PostgreSQL user must have permission to create and drop databases, and the server must provide the `simsom_clock` extension. If `psql`, `createdb`, or `dropdb` are not on your system `PATH`, provide their executable paths with `SIMSOM_PSQL_BIN`, `SIMSOM_CREATEDB_BIN`, and `SIMSOM_DROPDB_BIN`.
+
+When the required clients or PostgreSQL server are unavailable, `unittest` skips each of these three integration-test classes. A result such as `OK (skipped=3)` therefore has a successful exit status but does not verify the PostgreSQL integration behavior; confirm that the integration-test run reports no skips when validating database changes.
+
 Run a compile check for simulator code and tests:
 
 ```bash

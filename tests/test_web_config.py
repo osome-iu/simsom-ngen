@@ -97,6 +97,9 @@ class WebConfigTests(unittest.TestCase):
 
         self.assertIn('PARTITION BY source, target, "actionType"', sql)
         self.assertIn('COUNT(*) OVER interaction_group AS "interactionCount"', sql)
+        self.assertIn('interaction_details AS MATERIALIZED', sql)
+        self.assertIn("'contentModerationActions', \"contentModerationActions\"", sql)
+        self.assertIn('details.interactions', sql)
         self.assertIn('FROM grouped_interactions', sql)
         self.assertIn('SUM(interaction_count)::BIGINT AS weighted_degree', sql)
         self.assertIn(
