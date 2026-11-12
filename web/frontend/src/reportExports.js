@@ -114,6 +114,9 @@ export function buildHtmlReport(bundle) {
       ? Number(latest.actionCount || 0) / Number(latest.userCount)
       : null
   );
+  const averageResultActions = networkMeta.userCount && networkMeta.actionCount != null
+    ? Number(networkMeta.actionCount) / Number(networkMeta.userCount)
+    : averageActions;
   const userTypes = countBy(nodes, "userType");
   const edgeTypes = countBy(edges, "actionType");
   const simulatedTimestamps = series
@@ -135,11 +138,13 @@ export function buildHtmlReport(bundle) {
     shouldTerminate: lifecycle.shouldTerminate,
     runStatus: bundle.run?.status,
   });
+  const totalInteractionCount = networkMeta.interactionCount
+    ?? networkMeta.visibleInteractionCount;
 
   const summaryCards = [
     ["Users", formatNumber(networkMeta.userCount ?? latest.userCount ?? nodes.length)],
-    ["Interactions", formatNumber(networkMeta.interactionCount ?? edges.length)],
-    ["Avg. actions / user", formatNumber(averageActions, 2)],
+    ["Total interactions", formatNumber(totalInteractionCount ?? edges.length)],
+    ["Avg. actions / user", formatNumber(averageResultActions, 2)],
     ["Original posts", formatNumber(networkMeta.originalPostCount)],
   ];
   const runRows = [
@@ -148,7 +153,7 @@ export function buildHtmlReport(bundle) {
     ["Finished", formatDate(bundle.run?.finishedAt)],
     ["Return code", bundle.run?.returnCode],
     ["Users", latest.userCount],
-    ["Actions", latest.actionCount],
+    ["Actions", networkMeta.actionCount ?? latest.actionCount],
     ["Analytics snapshots", series.length],
     ["Software runtime", formatDuration(runtime.software_runtime_seconds)],
     ["Simulated runtime", formatDuration(runtime.simulated_runtime_seconds)],
@@ -157,15 +162,16 @@ export function buildHtmlReport(bundle) {
     ["Average content quality", formatNumber(latest.avgActionQuality, 3)],
     ["Policy coverage", formatPercent(policy.policy_coverage)],
     ["Intervention ratio", formatPercent(policy.policy_intervention_ratio)],
+    ["Policy-removed actions (posts + interactions)", formatNumber(networkMeta.policyRemovedActionCount)],
     ["Average users followed", formatNumber(networkStats.avg_friends_per_user, 2)],
   ];
   const networkRows = [
 
     ["Users", networkMeta.userCount ?? nodes.length],
     ["Shown users", networkMeta.truncated ? networkMeta.returnedNodeCount ?? nodes.length : null],
-    ["Returned interactions", networkMeta.returnedInteractionCount],
     ["Weighted edges", networkMeta.returnedEdgeCount ?? edges.length],
-    ["Total interactions", networkMeta.interactionCount],
+    ["Total interactions", totalInteractionCount],
+    ["Policy-removed interactions", networkMeta.policyRemovedInteractionCount],
     ["Original posts", networkMeta.originalPostCount],
     ["K-core level", networkMeta.truncated ? networkMeta.kCoreLevel : null],
     ["Network export truncated", networkMeta.truncated == null ? null : networkMeta.truncated ? "Yes" : "No"],
@@ -218,6 +224,7 @@ export function buildHtmlReport(bundle) {
     .columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
     .detail-panel { min-width: 0; padding: 20px; }
     .detail-panel h2 { margin-bottom: 12px; font-size: 16px; }
+    .detail-note { margin: -4px 0 12px; color: var(--muted); font-size: 11px; }
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 8px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
     th { color: var(--muted); background: var(--soft); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
@@ -256,16 +263,16 @@ export function buildHtmlReport(bundle) {
     </div>
     <div class="details-heading"><h2>Additional run analytics</h2><p>Quality, policy, runtime, network, and configuration details</p></div>
     <div class="columns">
-      <section class="panel detail-panel"><h2>Quality &amp; policy</h2>${keyValueTable(signalRows)}</section>
+      <section class="panel detail-panel"><h2>Quality &amp; policy</h2><p class="detail-note">Policy-removed actions include original posts and interactions; the network figure counts interactions only.</p>${keyValueTable(signalRows)}</section>
       <section class="panel detail-panel"><h2>Run context</h2>${keyValueTable(runRows)}</section>
-      <section class="panel detail-panel"><h2>Network summary</h2>${keyValueTable(networkRows)}</section>
+      <section class="panel detail-panel"><h2>Network summary</h2><p class="detail-note">Total interactions excludes duplicate likes and reposts but includes policy-removed interactions, which are also reported as a subset.</p>${keyValueTable(networkRows)}</section>
     </div>
     <div class="columns">
       <section class="panel detail-panel"><h2>Action mix</h2>${keyValueTable(Object.entries(actionMix).map(([key, value]) => [titleCase(key), formatPercent(value)]))}</section>
       <section class="panel detail-panel"><h2>User types</h2>${keyValueTable(Object.entries(userTypes).map(([key, value]) => [titleCase(key), value]))}</section>
       <section class="panel detail-panel"><h2>Weighted edges by type</h2>${keyValueTable(Object.entries(edgeTypes).map(([key, value]) => [titleCase(key), value]))}</section>
     </div>
-    ${networkMeta.truncated ? `<p class="note">K-core filtering was applied at level ${escapeHtml(formatNumber(networkMeta.kCoreLevel))}. The export includes ${escapeHtml(formatNumber(networkMeta.returnedNodeCount ?? nodes.length))} of ${escapeHtml(formatNumber(networkMeta.userCount))} users and ${escapeHtml(formatNumber(networkMeta.returnedInteractionCount))} of ${escapeHtml(formatNumber(networkMeta.interactionCount))} interactions across ${escapeHtml(formatNumber(networkMeta.returnedEdgeCount ?? edges.length))} weighted edges.</p>` : ""}
+    ${networkMeta.truncated ? `<p class="note">K-core filtering was applied at level ${escapeHtml(formatNumber(networkMeta.kCoreLevel))}. The export includes ${escapeHtml(formatNumber(networkMeta.returnedNodeCount ?? nodes.length))} of ${escapeHtml(formatNumber(networkMeta.userCount))} users across ${escapeHtml(formatNumber(networkMeta.returnedEdgeCount ?? edges.length))} weighted edges.</p>` : ""}
     <section class="panel detail-panel configuration-panel"><h2>Configuration</h2><p class="note">Configuration values used for this dashboard run.</p>${configurationRows.length ? keyValueTable(configurationRows, "configuration") : `<p>No run configuration was available.</p>`}</section>
     <footer>Generated by the SimSoM local web dashboard. The downloadable CSV and JSON exports retain the underlying values for further analysis.</footer>
   </main>

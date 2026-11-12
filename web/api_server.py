@@ -45,6 +45,8 @@ MAX_REQUEST_BODY_BYTES = 16_384
 DATABASE_PREFLIGHT_TIMEOUT_SECONDS = 5
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ACTION_TYPES = ("like", "post", "repost", "reply", "quote")
+NETWORK_DELETE_INTERVENTION = "delete"
+NETWORK_REMOVED_INTERVENTION = "removed"
 ANALYTICS_EVALUATION_UNITS = (
     "average_actions_per_user",
     "simulated_hours",
@@ -81,6 +83,48 @@ EDITABLE_CONFIG_PATHS = {
 ATOMIC_EDITABLE_CONFIG_PATHS = {
     ("termination", "criteria_functions"),
 }
+
+
+def _network_policy_visible_filter_sql(table_alias: str) -> str:
+    """Keep rows without a policy-removal intervention."""
+    return (
+        "NOT EXISTS ("
+        "SELECT 1 FROM jsonb_array_elements("
+        "CASE WHEN jsonb_typeof("
+        f"{table_alias}.moderation_actions"
+        ") = 'array' THEN "
+        f"{table_alias}.moderation_actions"
+        " ELSE '[]'::jsonb END"
+        ") AS moderation_action(intervention) "
+        "WHERE moderation_action.intervention->>'intervention_type' "
+        f"= '{NETWORK_REMOVED_INTERVENTION}'"
+        ")"
+    )
+
+
+def _network_result_action_filter_sql(table_alias: str) -> str:
+    """Keep the first like and newest repost for each actor/content pair."""
+    newest_repost = (
+        "NOT EXISTS ("
+        "SELECT 1 FROM jsonb_array_elements("
+        "CASE WHEN jsonb_typeof("
+        f"{table_alias}.moderation_actions"
+        ") = 'array' THEN "
+        f"{table_alias}.moderation_actions"
+        " ELSE '[]'::jsonb END"
+        ") AS moderation_action(intervention) "
+        "WHERE moderation_action.intervention->>'intervention_type' "
+        f"= '{NETWORK_DELETE_INTERVENTION}'"
+        ")"
+    )
+    return (
+        "("
+        f"{table_alias}.action_type NOT IN ('like', 'repost') "
+        f"OR ({table_alias}.action_type = 'like' "
+        f"AND {table_alias}.repeated_like_n_reshare_creator_count <= 1) "
+        f"OR ({table_alias}.action_type = 'repost' AND {newest_repost})"
+        ")"
+    )
 
 
 class DatabaseNotReadyError(RuntimeError):
@@ -924,7 +968,11 @@ class AnalyticsRepository:
         # reference users absent from an earlier k-core calculation.
         if truncated and interaction_count <= edge_limit:
             candidate = self._fetch_json(
-                self._network_rows_sql(edge_limit, None, active_nodes_only=True),
+                self._network_rows_sql(
+                    edge_limit,
+                    None,
+                    active_nodes_only=True,
+                ),
                 empty_payload={"nodes": [], "edges": []},
                 timeout_seconds=120,
             )
@@ -972,7 +1020,10 @@ class AnalyticsRepository:
                 selected_node_ids, k_core_level = cached
 
         payload = active_payload if active_payload is not None else self._fetch_json(
-            self._network_rows_sql(edge_limit, selected_node_ids),
+            self._network_rows_sql(
+                edge_limit,
+                selected_node_ids,
+            ),
             empty_payload={"nodes": [], "edges": []},
             timeout_seconds=120 if truncated else 60,
         )
@@ -1161,14 +1212,65 @@ class AnalyticsRepository:
         user_table = f'{schema}."user"'
         action_table = f'{schema}."action"'
         lifecycle_table = f'{schema}."simulation_lifecycle"'
+        selected_action_filter = _network_result_action_filter_sql("action")
+        selected_parent_filter = _network_result_action_filter_sql("parent")
+        surviving_action_filter = selected_action_filter
+        surviving_parent_filter = selected_parent_filter
+        visible_action_filter = (
+            f"{selected_action_filter} AND "
+            f"{_network_policy_visible_filter_sql('action')}"
+        )
+        visible_parent_filter = (
+            f"{selected_parent_filter} AND "
+            f"{_network_policy_visible_filter_sql('parent')}"
+        )
         return f"""
         WITH action_counts AS (
             SELECT
-                COUNT(*)::BIGINT AS action_count,
-                COUNT(*) FILTER (WHERE parent_action_id IS NULL)::BIGINT AS post_count,
-                COUNT(*) FILTER (WHERE parent_action_id IS NOT NULL)::BIGINT AS interaction_count,
-                MAX(timestamp) AS network_version
-            FROM {action_table}
+                COUNT(*) FILTER (
+                    WHERE {surviving_action_filter}
+                      AND (
+                          action.parent_action_id IS NULL
+                          OR {surviving_parent_filter}
+                      )
+                )::BIGINT AS surviving_action_count,
+                COUNT(*) FILTER (
+                    WHERE action.parent_action_id IS NOT NULL
+                      AND {surviving_action_filter}
+                      AND {surviving_parent_filter}
+                )::BIGINT AS surviving_interaction_count,
+                COUNT(*) FILTER (
+                    WHERE {visible_action_filter}
+                      AND (
+                          action.parent_action_id IS NULL
+                          OR {visible_parent_filter}
+                      )
+                )::BIGINT AS visible_action_count,
+                COUNT(*) FILTER (
+                    WHERE action.parent_action_id IS NOT NULL
+                      AND {visible_action_filter}
+                      AND {visible_parent_filter}
+                )::BIGINT AS visible_interaction_count,
+                COUNT(*) FILTER (
+                    WHERE {selected_action_filter}
+                      AND (
+                          action.parent_action_id IS NULL
+                          OR {selected_parent_filter}
+                      )
+                )::BIGINT AS action_count,
+                COUNT(*) FILTER (
+                    WHERE action.parent_action_id IS NULL
+                      AND {selected_action_filter}
+                )::BIGINT AS post_count,
+                COUNT(*) FILTER (
+                    WHERE action.parent_action_id IS NOT NULL
+                      AND {selected_action_filter}
+                      AND {selected_parent_filter}
+                )::BIGINT AS interaction_count,
+                MAX(action.timestamp) AS network_version
+            FROM {action_table} AS action
+            LEFT JOIN {action_table} AS parent
+                ON parent.action_id = action.parent_action_id
         )
         SELECT json_build_object(
             'meta', json_build_object(
@@ -1176,6 +1278,12 @@ class AnalyticsRepository:
                 'actionCount', action_count,
                 'originalPostCount', post_count,
                 'interactionCount', interaction_count,
+                'visibleActionCount', visible_action_count,
+                'visibleInteractionCount', visible_interaction_count,
+                'policyRemovedActionCount',
+                    surviving_action_count - visible_action_count,
+                'policyRemovedInteractionCount',
+                    surviving_interaction_count - visible_interaction_count,
                 'networkVersion', network_version,
                 'runStartedAt', (
                     SELECT started_at FROM {lifecycle_table} WHERE lifecycle_id = 1
@@ -1192,6 +1300,8 @@ class AnalyticsRepository:
     def _network_edge_list_sql(self) -> str:
         schema = f'"{self.schema}"'
         action_table = f'{schema}."action"'
+        action_filter = _network_result_action_filter_sql("action")
+        parent_filter = _network_result_action_filter_sql("parent")
         return f"""
         COPY (
             SELECT action.creator_user_id, parent.creator_user_id
@@ -1199,6 +1309,8 @@ class AnalyticsRepository:
             JOIN {action_table} AS parent
                 ON parent.action_id = action.parent_action_id
             WHERE action.parent_action_id IS NOT NULL
+                AND {action_filter}
+                AND {parent_filter}
         ) TO STDOUT WITH (FORMAT CSV, DELIMITER ' ');
         """
 
@@ -1278,6 +1390,8 @@ class AnalyticsRepository:
         schema = f'"{self.schema}"'
         user_table = f'{schema}."user"'
         action_table = f'{schema}."action"'
+        action_filter = _network_result_action_filter_sql("action")
+        parent_filter = _network_result_action_filter_sql("parent")
         if active_nodes_only:
             node_predicate = "node_strengths.user_id IS NOT NULL"
             edge_predicate = "TRUE"
@@ -1332,7 +1446,6 @@ class AnalyticsRepository:
                         THEN action.repeated_like_n_reshare_creator_count
                     ELSE parent.repeated_like_n_reshare_creator_count
                 END AS "contentRepeatActorCount",
-                action.moderation_actions AS "moderationActions",
                 CASE
                     WHEN action.action_type IN ('post', 'reply', 'quote')
                         THEN action.moderation_actions
@@ -1343,6 +1456,8 @@ class AnalyticsRepository:
             JOIN {action_table} AS parent
                 ON parent.action_id = action.parent_action_id
             WHERE {edge_predicate}
+                AND {action_filter}
+                AND {parent_filter}
             ORDER BY action.action_id DESC
             LIMIT {edge_limit}
         ), ranked_interactions AS MATERIALIZED (
@@ -1371,7 +1486,6 @@ class AnalyticsRepository:
                         'contentEmbeddingDimensions', "contentEmbeddingDimensions",
                         'contentViewCount', "contentViewCount",
                         'contentRepeatActorCount', "contentRepeatActorCount",
-                        'moderationActions', "moderationActions",
                         'contentModerationActions', "contentModerationActions",
                         'parentActionId', "parentActionId"
                     ) ORDER BY id DESC
@@ -1395,7 +1509,6 @@ class AnalyticsRepository:
                 ranked."contentEmbeddingDimensions",
                 ranked."contentViewCount",
                 ranked."contentRepeatActorCount",
-                ranked."moderationActions",
                 ranked."contentModerationActions",
                 ranked."parentActionId",
                 details.interactions
@@ -1420,8 +1533,13 @@ class AnalyticsRepository:
         SELECT json_build_object(
             'meta', json_build_object(
                 'interactionCount', (
-                    SELECT COUNT(*) FROM {action_table}
-                    WHERE parent_action_id IS NOT NULL
+                    SELECT COUNT(*)
+                    FROM {action_table} AS action
+                    JOIN {action_table} AS parent
+                        ON parent.action_id = action.parent_action_id
+                    WHERE action.parent_action_id IS NOT NULL
+                      AND {action_filter}
+                      AND {parent_filter}
                 )
             ),
             'nodes', COALESCE(
@@ -1516,7 +1634,10 @@ def create_app(
         edge_limit = int(request.args.get("edgeLimit", DEFAULT_NETWORK_EDGE_LIMIT))
         node_limit = int(request.args.get("nodeLimit", DEFAULT_NETWORK_NODE_LIMIT))
         return jsonify(
-            analytics.fetch_network(edge_limit=edge_limit, node_limit=node_limit)
+            analytics.fetch_network(
+                edge_limit=edge_limit,
+                node_limit=node_limit,
+            )
         )
 
     @app.get("/api/exports/database.sql.gz")
