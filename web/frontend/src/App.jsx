@@ -81,6 +81,8 @@ function App() {
     meta: {},
   });
   const [networkLoading, setNetworkLoading] = useState(false);
+  const resultsLoadingRef = useRef(false);
+  const currentRunRef = useRef(null);
   const [error, setError] = useState("");
   const [launchError, setLaunchError] = useState("");
 
@@ -93,16 +95,23 @@ function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [nextRun, nextResults] = await Promise.all([
-        api("/api/runs/current"),
-        api("/api/results"),
-      ]);
+      const nextRun = await api("/api/runs/current");
+      currentRunRef.current = nextRun;
       setRun(nextRun);
-      const setupInProgress = (
-        nextRun.status === "running" || nextRun.status === "stopping"
-      ) && (!nextRun.setup?.available || nextRun.setup?.status === "running");
-      setResults(setupInProgress ? { available: true, series: [] } : nextResults);
       setError("");
+      if (resultsLoadingRef.current) return;
+      resultsLoadingRef.current = true;
+      try {
+        const nextResults = await api("/api/results");
+        if (currentRunRef.current?.id !== nextRun.id) return;
+        const currentRun = currentRunRef.current;
+        const setupInProgress = (
+          currentRun.status === "running" || currentRun.status === "stopping"
+        ) && (!currentRun.setup?.available || currentRun.setup?.status === "running");
+        setResults(setupInProgress ? { available: true, series: [] } : nextResults);
+      } finally {
+        resultsLoadingRef.current = false;
+      }
     } catch (requestError) {
       setError(requestError.message);
     }
@@ -132,6 +141,7 @@ function App() {
         method: "POST",
         body: JSON.stringify(body),
       });
+      currentRunRef.current = nextRun;
       setRun(nextRun);
       setLaunchError("");
       setResults({ available: true, series: [] });
@@ -357,7 +367,7 @@ const convergenceReason = latest?.convergenceReason
 
         <div className="dashboard-grid">
             <Panel className="network-panel" title="User interaction network">
-              <NetworkVisualization graph={networkGraph} loading={networkLoading} setup={run.setup} runStatus={run.status} avgActionsPerUser={avgActionsPerUser} />
+              <NetworkVisualization graph={networkGraph} loading={networkLoading} setup={run.setup} runStatus={run.status} avgActionsPerUser={avgActionsPerUser} hasAnalyticsSnapshot={hasCurrentRunSnapshot} firstSnapshotPercent={firstAnalyticsIntervalProgress(run, results)} />
             </Panel>
 
             <div className="dashboard-side-column">
@@ -415,6 +425,7 @@ function ExportMenu({ run, results, network, configuration }) {
   const hasAnalytics = Boolean(results?.series?.length);
   const hasNodes = Boolean(network?.nodes?.length);
   const hasEdges = Boolean(network?.edges?.length);
+  const runActive = run?.status === "running" || run?.status === "stopping";
 
   function download(kind) {
     const bundle = buildExportBundle({ run, results, network, configuration });
@@ -422,8 +433,8 @@ function ExportMenu({ run, results, network, configuration }) {
     const exports = {
       html: [`${baseName}-report.html`, buildHtmlReport(bundle), "text/html"],
       analytics: [`${baseName}-analytics.csv`, analyticsCsv(results.series), "text/csv"],
-      nodes: [`${baseName}-nodes.csv`, nodesCsv(network.nodes), "text/csv"],
-      edges: [`${baseName}-edges.csv`, edgesCsv(network.edges), "text/csv"],
+      nodes: [`${baseName}-interaction-network-users.csv`, nodesCsv(network.nodes), "text/csv"],
+      edges: [`${baseName}-interaction-network-edges.csv`, edgesCsv(network.edges), "text/csv"],
       json: [`${baseName}-complete.json`, completeJson(bundle), "application/json"],
     };
     const selected = exports[kind];
@@ -454,16 +465,29 @@ function ExportMenu({ run, results, network, configuration }) {
           onClick={() => download("analytics")}
         />
         <ExportOption
-          title="Network nodes CSV"
-          description="User attributes for statistical analysis"
+          title="Displayed interaction-network users CSV"
+          description="Users displayed in the current visualization"
           disabled={!hasNodes}
           onClick={() => download("nodes")}
         />
         <ExportOption
-          title="Network edges CSV"
-          description="Interaction and post attributes"
+          title="Displayed interaction-network edges CSV"
+          description="Interactions displayed in the current visualization"
           disabled={!hasEdges}
           onClick={() => download("edges")}
+        />
+        <ExportOption
+          title="Initial follower network CSV"
+          description="Initial follower network"
+          href="/api/exports/follower-network.csv"
+          onClick={() => { if (menuRef.current) menuRef.current.open = false; }}
+        />
+        <ExportOption
+          title="Database SQL (.sql.gz)"
+          description="Compressed SQL with schema, data, and saved simulator clock"
+          disabled={runActive}
+          href="/api/exports/database.sql.gz"
+          onClick={() => { if (menuRef.current) menuRef.current.open = false; }}
         />
         <ExportOption
           title="Complete JSON"
@@ -475,7 +499,27 @@ function ExportMenu({ run, results, network, configuration }) {
   );
 }
 
-function ExportOption({ title, description, disabled = false, onClick }) {
+function ExportOption({ title, description, disabled = false, onClick, href }) {
+  if (href) {
+    return (
+      <a
+        href={disabled ? undefined : href}
+        download
+        aria-disabled={disabled}
+        className={disabled ? "is-disabled" : ""}
+        onClick={(event) => {
+          if (disabled) {
+            event.preventDefault();
+            return;
+          }
+          onClick?.();
+        }}
+      >
+        <strong>{title}</strong>
+        <span>{description}</span>
+      </a>
+    );
+  }
   return (
     <button type="button" disabled={disabled} onClick={onClick}>
       <strong>{title}</strong>
@@ -724,7 +768,7 @@ function Panel({ kicker, title, className = "", children }) {
   );
 }
 
-function NetworkVisualization({ graph, loading, setup, runStatus, avgActionsPerUser }) {
+function NetworkVisualization({ graph, loading, setup, runStatus, avgActionsPerUser, hasAnalyticsSnapshot, firstSnapshotPercent }) {
   const meta = graph.meta || {};
   const [selection, setSelection] = useState(null);
   const isLiveRun = runStatus === "running" || runStatus === "stopping";
@@ -740,10 +784,10 @@ function NetworkVisualization({ graph, loading, setup, runStatus, avgActionsPerU
   }, [graph]);
 
   if (!graph.available) {
-    return <div className="network-visualization"><NetworkProgress setup={setup} runStatus={runStatus} /><div className="network-empty"><strong>Network unavailable</strong><p>{graph.message}</p></div></div>;
+    return <div className="network-visualization"><NetworkProgress setup={setup} runStatus={runStatus} hasAnalyticsSnapshot={hasAnalyticsSnapshot} firstSnapshotPercent={firstSnapshotPercent} /><div className="network-empty"><strong>Network unavailable</strong><p>{graph.message}</p></div></div>;
   }
   if (!graph.nodes?.length) {
-    return <div className="network-visualization"><NetworkProgress setup={setup} runStatus={runStatus} /><div className="network-empty"><strong>No network rows yet</strong><p>Users and post interactions will appear as the simulation initializes.</p></div></div>;
+    return <div className="network-visualization"><NetworkProgress setup={setup} runStatus={runStatus} hasAnalyticsSnapshot={hasAnalyticsSnapshot} firstSnapshotPercent={firstSnapshotPercent} /><div className="network-empty"><strong>No network rows yet</strong><p>Users and post interactions will appear as the simulation initializes.</p></div></div>;
   }
 
   return (
@@ -787,31 +831,76 @@ function NetworkVisualization({ graph, loading, setup, runStatus, avgActionsPerU
   );
 }
 
-function NetworkProgress({ setup, runStatus }) {
+function firstAnalyticsIntervalProgress(run, results) {
+  const interval = run.config?.analytics?.evaluation_interval;
+  const simulatedTime = results.currentSimulatorTimestampMs;
+  if (interval?.unit !== "simulated_hours" || simulatedTime == null) return null;
+  const intervalMs = Number(interval.value) * 60 * 60 * 1000;
+  const tickMs = Number(simulatedTime);
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0 || !Number.isFinite(tickMs)) return null;
+  return Math.max(0, Math.min(100, tickMs * 100 / intervalMs));
+}
+
+function NetworkProgress({ setup, runStatus, hasAnalyticsSnapshot, firstSnapshotPercent }) {
   const isActive = runStatus === "running" || runStatus === "stopping";
+  if (setup?.status === "complete") {
+    if (!isActive) return null;
+    const simulating = !hasAnalyticsSnapshot;
+    const hasIntervalProgress = simulating && Number.isFinite(firstSnapshotPercent)
+      && firstSnapshotPercent < 100;
+    return (
+      <div className="network-progress" aria-live="polite">
+        <div className="network-progress-heading">
+          <strong>{simulating ? "Simulating interactions" : "Loading interaction network"}</strong>
+          {hasIntervalProgress && <span>{number(firstSnapshotPercent, 1)}%</span>}
+        </div>
+        <div className={`network-progress-track${hasIntervalProgress ? "" : " is-indeterminate"}`} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={hasIntervalProgress ? firstSnapshotPercent : undefined}>
+          <div className="network-progress-fill" style={{ width: hasIntervalProgress ? `${firstSnapshotPercent}%` : undefined }} />
+        </div>
+        <div className="network-progress-detail">
+          {simulating ? "Workers are creating posts and interactions. The first network view appears after the analytics check." : "Preparing the latest network view…"}
+        </div>
+      </div>
+    );
+  }
   const current = Number(setup?.progress_current);
   const total = Number(setup?.progress_total);
-  const hasProgress = Number.isFinite(current) && Number.isFinite(total) && total >= 0;
+  const hasProgress = setup?.progress_current != null && setup?.progress_total != null
+    && Number.isFinite(current) && Number.isFinite(total) && total > 0;
   const percentValue = hasProgress
-    ? Math.max(0, Math.min(100, Number(setup.progress_percent ?? (total ? current * 100 / total : 100))))
+    ? Math.max(0, Math.min(100, Number(setup.progress_percent ?? current * 100 / total)))
     : 0;
-  const stage = setup?.stage === "network_generation" ? "Generating network" : "Preparing network";
+  const stageLabels = {
+    user_planning: "Planning users",
+    user_generation: "Generating users",
+    network_generation: "Generating follower network",
+    network_import: "Importing follower network",
+    database_schema: "Preparing database",
+    database_load: "Loading database",
+    database_indexes: "Building database indexes",
+    setup: "Finishing setup",
+  };
+  const stage = stageLabels[setup?.stage] || "Starting simulation setup";
   const phase = setup?.phase ? ` · ${setup.phase.replaceAll("_", " ")}` : "";
   const detail = hasProgress
-    ? `${number(current)} of ${number(total)} ${setup.progress_unit || "items"}${setup.network_total_users ? ` · ${number(setup.network_total_users)} total users` : ""}`
-    : (isActive ? "Starting network generation…" : "Network generation is idle");
+    ? `${number(current)} of ${number(total)} ${setup.progress_unit === "source_users" ? "source users processed" : setup.progress_unit || "items"}${setup.network_total_users ? ` · ${number(setup.network_total_users)} total users` : ""}`
+    : (setup?.rows_sent != null ? `${number(setup.rows_sent)} rows loaded` : null);
+  const details = [
+    detail,
+    setup?.total_edges !== undefined ? `${number(setup.total_edges)} edges generated` : null,
+  ].filter(Boolean);
 
   if (!isActive && !hasProgress) return null;
   return (
     <div className="network-progress" aria-live="polite">
       <div className="network-progress-heading">
         <span><strong>{stage}</strong>{phase}</span>
-        <span>{hasProgress ? `${number(percentValue, 1)}%` : "Working…"}</span>
+        {hasProgress && <span>{number(percentValue, 1)}%</span>}
       </div>
       <div className={`network-progress-track${hasProgress ? "" : " is-indeterminate"}`} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={hasProgress ? percentValue : undefined}>
         <div className="network-progress-fill" style={{ width: hasProgress ? `${percentValue}%` : undefined }} />
       </div>
-      <div className="network-progress-detail">{detail}{setup?.total_edges !== undefined ? ` · ${number(setup.total_edges)} edges generated` : ""}</div>
+      {details.length > 0 && <div className="network-progress-detail">{details.join(" · ")}</div>}
     </div>
   );
 }

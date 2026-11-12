@@ -6,6 +6,7 @@ import argparse
 from collections import deque
 from copy import deepcopy
 from datetime import datetime, timezone
+import gzip
 from http import HTTPStatus
 import json
 import math
@@ -21,7 +22,7 @@ import threading
 from typing import Any
 from uuid import uuid4
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 import jsonc
 from werkzeug.exceptions import BadRequest
 from werkzeug.serving import BaseWSGIServer, make_server
@@ -220,6 +221,30 @@ def _write_temporary_config(config: dict[str, Any]) -> Path:
         json.dump(config, config_file, indent=2)
         config_file.write("\n")
     return Path(file_name)
+
+
+def _temporary_export_path(suffix: str) -> Path:
+    """Reserve a process-unique temporary path for a streamed export."""
+    descriptor, file_name = tempfile.mkstemp(prefix="simsom-export-", suffix=suffix)
+    os.close(descriptor)
+    return Path(file_name)
+
+
+def _send_temporary_export(path: Path, *, download_name: str, mimetype: str):
+    """Stream one generated artifact and remove it when the response closes."""
+    response = send_file(
+        path,
+        as_attachment=True,
+        download_name=download_name,
+        mimetype=mimetype,
+        max_age=0,
+    )
+    response.call_on_close(lambda: path.unlink(missing_ok=True))
+    return response
+
+
+def _export_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 
 def _leaf_paths(value: Any, prefix: tuple[str, ...] = ()):
@@ -727,6 +752,130 @@ class AnalyticsRepository:
             empty_payload={"series": [], "lifecycle": None},
         )
 
+    def create_database_sql_export(self) -> Path:
+        """Create a gzip-compressed SQL dump with the clock and its saved state."""
+        pg_dump = self._resolve_pg_dump()
+        psql = self._resolve_psql()
+        output_path = _temporary_export_path(".sql")
+        compressed_path: Path | None = None
+        command = [
+            pg_dump,
+            "--dbname",
+            self.dsn,
+            "--file",
+            str(output_path),
+            "--format=plain",
+            "--no-owner",
+            "--no-privileges",
+            "--schema",
+            self.schema,
+            "--extension",
+            self.clock_extension,
+        ]
+        clock_table = f'"{self.schema}"."simsom_clock_state"'
+        clock_state_sql = f"""
+        SELECT format(
+            'INSERT INTO {clock_table} SELECT * FROM pg_catalog.jsonb_populate_record(NULL::{clock_table}, %L::jsonb);',
+            to_jsonb(clock)
+        )
+        FROM {clock_table} AS clock;
+        """
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=REPOSITORY_ROOT,
+                env=_postgres_path_environment(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if completed.returncode != 0:
+                raise RuntimeError(
+                    completed.stderr.strip() or "Could not create the database SQL export"
+                )
+
+            clock_state = subprocess.run(
+                [
+                    psql,
+                    "-X",
+                    "-q",
+                    "-A",
+                    "-t",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "--dbname",
+                    self.dsn,
+                    "--command",
+                    clock_state_sql,
+                ],
+                cwd=REPOSITORY_ROOT,
+                env=_postgres_path_environment(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if clock_state.returncode != 0:
+                raise RuntimeError(
+                    clock_state.stderr.strip() or "Could not export the simulator clock state"
+                )
+            if clock_state.stdout.strip():
+                with output_path.open("a", encoding="utf-8") as output:
+                    output.write("\n-- Saved simulator clock state\n")
+                    output.write(clock_state.stdout.rstrip("\n") + "\n")
+            compressed_path = _temporary_export_path(".sql.gz")
+            with output_path.open("rb") as source, gzip.open(
+                compressed_path, "wb", compresslevel=9
+            ) as compressed:
+                shutil.copyfileobj(source, compressed)
+            return compressed_path
+        except Exception:
+            if compressed_path is not None:
+                compressed_path.unlink(missing_ok=True)
+            raise
+        finally:
+            output_path.unlink(missing_ok=True)
+
+    def create_follower_network_export(self) -> Path:
+        """Create a complete directed follower-network CSV for download."""
+        output_path = _temporary_export_path(".csv")
+        table = f'"{self.schema}"."follower_network"'
+        sql = f"""
+        COPY (
+            SELECT user_id, friend_id
+            FROM {table}
+            ORDER BY user_id, friend_id
+        ) TO STDOUT WITH (FORMAT CSV, HEADER TRUE);
+        """
+        try:
+            with output_path.open("w", encoding="utf-8", newline="") as output:
+                completed = subprocess.run(
+                    [
+                        self._resolve_psql(),
+                        "-X",
+                        "-q",
+                        "-v",
+                        "ON_ERROR_STOP=1",
+                        "--dbname",
+                        self.dsn,
+                    ],
+                    cwd=REPOSITORY_ROOT,
+                    env=_postgres_path_environment(),
+                    input=sql,
+                    stdout=output,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False,
+                )
+        except (OSError, subprocess.SubprocessError):
+            output_path.unlink(missing_ok=True)
+            raise
+        if completed.returncode != 0:
+            output_path.unlink(missing_ok=True)
+            raise RuntimeError(
+                completed.stderr.strip() or "Could not export the follower network"
+            )
+        return output_path
+
     def fetch_network(
         self,
         *,
@@ -768,8 +917,27 @@ class AnalyticsRepository:
         truncated = user_count > node_limit or interaction_count > edge_limit
         selected_node_ids: frozenset[int] | None = None
         k_core_level = 0
+        active_payload = None
 
-        if truncated:
+        # When all interactions fit, derive the 1-core from the same SQL
+        # statement as the displayed rows. New interactions can otherwise
+        # reference users absent from an earlier k-core calculation.
+        if truncated and interaction_count <= edge_limit:
+            candidate = self._fetch_json(
+                self._network_rows_sql(edge_limit, None, active_nodes_only=True),
+                empty_payload={"nodes": [], "edges": []},
+                timeout_seconds=120,
+            )
+            candidate_meta = candidate.get("meta") or {}
+            if (
+                candidate.get("available")
+                and int(candidate_meta.get("interactionCount") or 0) <= edge_limit
+                and len(candidate.get("nodes") or []) <= node_limit
+            ):
+                active_payload = candidate
+                k_core_level = 1
+
+        if truncated and active_payload is None:
             cache_key = (
                 user_count,
                 interaction_count,
@@ -803,7 +971,7 @@ class AnalyticsRepository:
             else:
                 selected_node_ids, k_core_level = cached
 
-        payload = self._fetch_json(
+        payload = active_payload if active_payload is not None else self._fetch_json(
             self._network_rows_sql(edge_limit, selected_node_ids),
             empty_payload={"nodes": [], "edges": []},
             timeout_seconds=120 if truncated else 60,
@@ -814,11 +982,15 @@ class AnalyticsRepository:
 
         nodes = payload.get("nodes") or []
         edges = payload.get("edges") or []
+        # The preflight count decides whether filtering is needed, but the
+        # displayed total must share the rows query's PostgreSQL snapshot.
+        snapshot_meta = payload.pop("meta", {})
         returned_interaction_count = sum(
             int(edge.get("interactionCount") or 0) for edge in edges
         )
         payload["meta"] = {
             **meta,
+            **snapshot_meta,
             "returnedNodeCount": len(nodes),
             "returnedEdgeCount": len(edges),
             "returnedInteractionCount": returned_interaction_count,
@@ -902,6 +1074,19 @@ class AnalyticsRepository:
         resolved = shutil.which("psql")
         if resolved is None:
             raise RuntimeError("psql is not available on PATH")
+        return resolved
+
+    @staticmethod
+    def _resolve_pg_dump() -> str:
+        configured = os.environ.get("SIMSOM_PG_DUMP_BIN")
+        if configured:
+            return configured
+        homebrew_pg_dump = Path("/opt/homebrew/opt/postgresql@18/bin/pg_dump")
+        if homebrew_pg_dump.is_file():
+            return str(homebrew_pg_dump)
+        resolved = shutil.which("pg_dump")
+        if resolved is None:
+            raise RuntimeError("pg_dump is not available on PATH")
         return resolved
 
     def _results_sql(self) -> str:
@@ -1087,11 +1272,16 @@ class AnalyticsRepository:
         self,
         edge_limit: int,
         selected_node_ids: frozenset[int] | None,
+        *,
+        active_nodes_only: bool = False,
     ) -> str:
         schema = f'"{self.schema}"'
         user_table = f'{schema}."user"'
         action_table = f'{schema}."action"'
-        if selected_node_ids is None:
+        if active_nodes_only:
+            node_predicate = "node_strengths.user_id IS NOT NULL"
+            edge_predicate = "TRUE"
+        elif selected_node_ids is None:
             node_predicate = "TRUE"
             edge_predicate = "TRUE"
         elif selected_node_ids:
@@ -1228,6 +1418,12 @@ class AnalyticsRepository:
             GROUP BY user_id
         )
         SELECT json_build_object(
+            'meta', json_build_object(
+                'interactionCount', (
+                    SELECT COUNT(*) FROM {action_table}
+                    WHERE parent_action_id IS NOT NULL
+                )
+            ),
             'nodes', COALESCE(
                 (
                     SELECT json_agg(row_to_json(node_row) ORDER BY node_row.id)
@@ -1321,6 +1517,26 @@ def create_app(
         node_limit = int(request.args.get("nodeLimit", DEFAULT_NETWORK_NODE_LIMIT))
         return jsonify(
             analytics.fetch_network(edge_limit=edge_limit, node_limit=node_limit)
+        )
+
+    @app.get("/api/exports/database.sql.gz")
+    def database_sql_export():
+        if runs.status().get("status") in {"running", "stopping"}:
+            raise RuntimeError("Database SQL exports are available after the run finishes")
+        return _send_temporary_export(
+            analytics.create_database_sql_export(),
+            download_name=f"simsom-{_export_timestamp()}-database.sql.gz",
+            mimetype="application/gzip",
+        )
+
+    @app.get("/api/exports/follower-network.csv")
+    def follower_network_export():
+        return _send_temporary_export(
+            analytics.create_follower_network_export(),
+            download_name=(
+                f"simsom-{_export_timestamp()}-initial-follower-network.csv"
+            ),
+            mimetype="text/csv",
         )
 
     @app.post("/api/runs")

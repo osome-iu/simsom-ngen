@@ -220,8 +220,9 @@ useful for immediate downloads of the currently loaded view.
 8. As analytics snapshots arrive, the browser refreshes the network dataset
    for Helios rendering, including while the simulation is running.
 9. A stop request asks the run manager to terminate the active subprocess.
-10. Downloads are generated from the run data currently available to the
-    frontend.
+10. Visualization reports and files are generated from data currently loaded
+    by the frontend; complete follower-network and database artifacts are
+    generated and streamed by the API.
 
 ### 5.2 Current HTTP contract
 
@@ -234,6 +235,8 @@ useful for immediate downloads of the currently loaded view.
 | `POST /api/runs/current/stop` | Stop the active local run |
 | `GET /api/results` | Get the analytics series and lifecycle state |
 | `GET /api/network?edgeLimit=...&nodeLimit=...` | Get network nodes, edges, and k-core filtering metadata |
+| `GET /api/exports/follower-network.csv` | Download the complete initial directed follower network |
+| `GET /api/exports/database.sql.gz` | Download gzip-compressed SQL with the simulator schema, data, and saved clock state after the run finishes |
 
 ### 5.3 Required simulator-facing contract
 

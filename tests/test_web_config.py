@@ -1,8 +1,10 @@
 """Contract tests for the dashboard's editable simulator configuration."""
 
 from copy import deepcopy
+import gzip
 from pathlib import Path
 import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -97,9 +99,11 @@ class WebConfigTests(unittest.TestCase):
 
         self.assertIn('PARTITION BY source, target, "actionType"', sql)
         self.assertIn('COUNT(*) OVER interaction_group AS "interactionCount"', sql)
+
         self.assertIn('interaction_details AS MATERIALIZED', sql)
         self.assertIn("'contentModerationActions', \"contentModerationActions\"", sql)
         self.assertIn('details.interactions', sql)
+        self.assertIn("WHERE parent_action_id IS NOT NULL", sql)
         self.assertIn('FROM grouped_interactions', sql)
         self.assertIn('SUM(interaction_count)::BIGINT AS weighted_degree', sql)
         self.assertIn(
@@ -109,6 +113,7 @@ class WebConfigTests(unittest.TestCase):
 
     def test_network_metadata_distinguishes_weighted_edges_from_interactions(self) -> None:
         repository = AnalyticsRepository()
+        # Actions can arrive between the filtering preflight and the rows query.
         stats = {
             "available": True,
             "meta": {"userCount": 2, "interactionCount": 3},
@@ -116,9 +121,10 @@ class WebConfigTests(unittest.TestCase):
         }
         rows = {
             "available": True,
+            "meta": {"interactionCount": 4},
             "nodes": [{"id": 1}, {"id": 2}],
             "edges": [
-                {"id": 10, "interactionCount": 2},
+                {"id": 10, "interactionCount": 3},
                 {"id": 12, "interactionCount": 1},
             ],
         }
@@ -127,7 +133,35 @@ class WebConfigTests(unittest.TestCase):
             payload = repository.fetch_network(edge_limit=100, node_limit=100)
 
         self.assertEqual(payload["meta"]["returnedEdgeCount"], 2)
-        self.assertEqual(payload["meta"]["returnedInteractionCount"], 3)
+        self.assertEqual(payload["meta"]["returnedInteractionCount"], 4)
+        self.assertEqual(payload["meta"]["interactionCount"], 4)
+
+
+    def test_live_network_uses_current_active_users_when_interactions_fit(self) -> None:
+        repository = AnalyticsRepository()
+        stats = {
+            "available": True,
+            "meta": {"userCount": 100, "interactionCount": 3},
+            "userIds": list(range(1, 101)),
+        }
+        rows = {
+            "available": True,
+            "meta": {"interactionCount": 4},
+            "nodes": [{"id": 1}, {"id": 2}],
+            "edges": [{"id": 10, "interactionCount": 4}],
+        }
+
+        with patch.object(repository, "_fetch_json", side_effect=[stats, rows]) as fetch, patch.object(
+            repository, "_python_k_core"
+        ) as core:
+            payload = repository.fetch_network(edge_limit=10, node_limit=10)
+
+        core.assert_not_called()
+        self.assertIn("node_strengths.user_id IS NOT NULL", fetch.call_args_list[1].args[0])
+        self.assertEqual(payload["meta"]["kCoreLevel"], 1)
+        self.assertEqual(payload["meta"]["interactionCount"], 4)
+        self.assertEqual(payload["meta"]["returnedInteractionCount"], 4)
+
 
 
 class DatabaseReadinessTests(unittest.TestCase):
@@ -250,6 +284,111 @@ class DatabaseReadinessTests(unittest.TestCase):
         self.assertFalse(readiness["ready"])
         self.assertEqual(readiness["status"], "insufficient_database_privileges")
         self.assertIn("simulator", readiness["message"])
+
+    def test_database_export_gzips_sql_with_clock_state(self) -> None:
+        dumped = SimpleNamespace(returncode=0, stdout="", stderr="")
+        clock_state = SimpleNamespace(
+            returncode=0,
+            stdout='INSERT INTO "simsom"."simsom_clock_state" SELECT 1;\n',
+            stderr="",
+        )
+        repository = AnalyticsRepository()
+
+        with patch.object(
+            repository, "_resolve_pg_dump", return_value="pg_dump"
+        ), patch.object(
+            repository, "_resolve_psql", return_value="psql"
+        ), patch(
+            "web.api_server.subprocess.run", side_effect=[dumped, clock_state]
+        ) as run:
+            output_path = repository.create_database_sql_export()
+
+        try:
+            command = run.call_args_list[0].args[0]
+            self.assertIn("--format=plain", command)
+            self.assertIn("--no-owner", command)
+            self.assertIn("--no-privileges", command)
+            self.assertEqual(command[command.index("--schema") + 1], repository.schema)
+            self.assertEqual(
+                command[command.index("--extension") + 1],
+                repository.clock_extension,
+            )
+            self.assertIn(
+                "jsonb_populate_record", run.call_args_list[1].args[0][-1]
+            )
+            self.assertTrue(output_path.name.endswith(".sql.gz"))
+            self.assertFalse(Path(command[command.index("--file") + 1]).exists())
+            with gzip.open(output_path, "rt", encoding="utf-8") as exported:
+                self.assertIn(clock_state.stdout, exported.read())
+        finally:
+            output_path.unlink(missing_ok=True)
+
+    def test_follower_network_export_streams_complete_csv_from_postgres(self) -> None:
+        completed = SimpleNamespace(returncode=0, stdout=None, stderr="")
+        repository = AnalyticsRepository()
+
+        with patch.object(
+            repository, "_resolve_psql", return_value="psql"
+        ), patch("web.api_server.subprocess.run", return_value=completed) as run:
+            output_path = repository.create_follower_network_export()
+
+        try:
+            self.assertIn("SELECT user_id, friend_id", run.call_args.kwargs["input"])
+            self.assertIn("FORMAT CSV, HEADER TRUE", run.call_args.kwargs["input"])
+            self.assertIn('"simsom"."follower_network"', run.call_args.kwargs["input"])
+            self.assertEqual(output_path.suffix, ".csv")
+            self.assertNotIn("capture_output", run.call_args.kwargs)
+        finally:
+            output_path.unlink(missing_ok=True)
+
+    def test_export_routes_stream_server_generated_files(self) -> None:
+        class StubRuns:
+            def status(self):
+                return {"status": "completed"}
+
+        class StubAnalytics:
+            def create_database_sql_export(self):
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".sql.gz") as output:
+                    output.write(gzip.compress(b"CREATE EXTENSION simsom_clock;\n"))
+                    return Path(output.name)
+
+            def create_follower_network_export(self):
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=".csv",
+                    mode="w",
+                    encoding="utf-8",
+                ) as output:
+                    output.write("user_id,friend_id\n1,2\n")
+                    return Path(output.name)
+
+        client = create_app(
+            run_manager=StubRuns(),
+            analytics_repository=StubAnalytics(),
+        ).test_client()
+
+        sql_response = client.get("/api/exports/database.sql.gz")
+        follower_response = client.get("/api/exports/follower-network.csv")
+        try:
+            self.assertEqual(sql_response.status_code, 200)
+            self.assertEqual(sql_response.mimetype, "application/gzip")
+            self.assertEqual(
+                gzip.decompress(sql_response.data),
+                b"CREATE EXTENSION simsom_clock;\n",
+            )
+            self.assertIn(
+                "database.sql.gz",
+                sql_response.headers["Content-Disposition"],
+            )
+            self.assertEqual(follower_response.status_code, 200)
+            self.assertEqual(follower_response.mimetype, "text/csv")
+            self.assertEqual(
+                follower_response.data,
+                b"user_id,friend_id\n1,2\n",
+            )
+        finally:
+            sql_response.close()
+            follower_response.close()
 
     def test_start_route_rejects_run_when_database_is_not_ready(self) -> None:
         class StubRuns:
