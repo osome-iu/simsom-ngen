@@ -103,7 +103,7 @@ class WebConfigTests(unittest.TestCase):
         self.assertIn('interaction_details AS MATERIALIZED', sql)
         self.assertIn("'contentModerationActions', \"contentModerationActions\"", sql)
         self.assertIn('details.interactions', sql)
-        self.assertIn("WHERE parent_action_id IS NOT NULL", sql)
+        self.assertIn("WHERE action.parent_action_id IS NOT NULL", sql)
         self.assertIn('FROM grouped_interactions', sql)
         self.assertIn('SUM(interaction_count)::BIGINT AS weighted_degree', sql)
         self.assertIn(

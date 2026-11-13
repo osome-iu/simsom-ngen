@@ -194,7 +194,7 @@ function App() {
         if (active) setNetworkLoading(false);
       });
     return () => { active = false; };
-  }, [latest?.actionCount, run.id, run.status]);
+  }, [latest?.id, latest?.actionCount, run.id, run.status]);
 
   const properties = latest?.otherProperties || {};
   const runtime = properties.runtime || {};
@@ -547,8 +547,8 @@ function BasicRunConfig({ config, disabled, onChange, onCriterionChange }) {
           <span>Users created at the start of the run</span>
         </header>
         <div className="field-pair">
-          <ConfigField label="Normal" value={normal.num_nodes} min={0} max={1000000} step={100} onChange={(value) => onChange(["setup_db", "user_types", "normal", "num_nodes"], value)} disabled={disabled} />
-          <ConfigField label="Bad Actors" value={bad.num_nodes} min={0} max={1000000} step={10} onChange={(value) => onChange(["setup_db", "user_types", "bad", "num_nodes"], value)} disabled={disabled} />
+          <ConfigField label="Normal" value={normal.num_nodes} min={0} max={1000000} step={100} emptyValue={0} onChange={(value) => onChange(["setup_db", "user_types", "normal", "num_nodes"], value)} disabled={disabled} />
+          <ConfigField label="Bad Actors" value={bad.num_nodes} min={0} max={1000000} step={10} emptyValue={0} onChange={(value) => onChange(["setup_db", "user_types", "bad", "num_nodes"], value)} disabled={disabled} />
         </div>
       </section>
 
@@ -720,11 +720,22 @@ function ConfigGroup({ title, subtitle, className = "", children }) {
   );
 }
 
-function ConfigField({ label, value, onChange, disabled, min, max, step }) {
+function ConfigField({ label, value, onChange, disabled, min, max, step, emptyValue = "" }) {
   return (
     <label className="config-field">
       <span>{label}</span>
-      <input type="number" value={value} min={min} max={max} step={step} disabled={disabled} onChange={(event) => onChange(parseNumericInput(event.target.value))} />
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        onChange={(event) => onChange(parseNumericInput(event.target.value))}
+        onBlur={(event) => {
+          if (event.target.value === "" && emptyValue !== "") onChange(emptyValue);
+        }}
+      />
     </label>
   );
 }
@@ -773,6 +784,10 @@ function NetworkVisualization({ graph, loading, setup, runStatus, avgActionsPerU
   const [selection, setSelection] = useState(null);
   const isLiveRun = runStatus === "running" || runStatus === "stopping";
   const isFiltered = Boolean(meta.kCoreApplied || meta.truncated);
+  const totalInteractionCount = meta.interactionCount ?? meta.visibleInteractionCount;
+  const avgActionsForGraph = meta.userCount && meta.actionCount != null
+    ? Number(meta.actionCount) / Number(meta.userCount)
+    : avgActionsPerUser;
 
   useEffect(() => {
     setSelection((current) => {
@@ -799,17 +814,16 @@ function NetworkVisualization({ graph, loading, setup, runStatus, avgActionsPerU
         <div className="network-meta-stats">
             <div><strong>{number(meta.userCount)}</strong><span>{isFiltered ? "total users" : "users"}</span></div>
             {isFiltered && <div><strong>{number(meta.returnedNodeCount)}</strong><span>shown users</span></div>}
-            <div><strong>{number(meta.interactionCount)}</strong><span>{isFiltered ? "total interactions" : "interactions"}</span></div>
-            {isFiltered && <div><strong>{number(meta.returnedInteractionCount)}</strong><span>shown interactions</span></div>}
-            <div><strong>{number(avgActionsPerUser, 2)}</strong><span>avg. actions / user</span></div>
+            <div><strong>{number(totalInteractionCount)}</strong><span>interactions</span></div>
+            <div><strong>{number(avgActionsForGraph, 2)}</strong><span>avg. actions / user</span></div>
             <div><strong>{number(meta.originalPostCount)}</strong><span>original posts</span></div>
         </div>
       </div>
       {meta.truncated && (
         <div className="network-sample-notice">
           {isLiveRun
-            ? <>Live network snapshot. K-core filtering is currently applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} users and {number(meta.returnedInteractionCount)} interactions. Final totals are unavailable until the simulation finishes.</>
-            : <>Network generated successfully. K-core filtering was applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} of {number(meta.userCount)} users and {number(meta.returnedInteractionCount)} of {number(meta.interactionCount)} interactions.</>}
+            ? <>Live network snapshot. K-core filtering is currently applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} users across {number(meta.returnedEdgeCount)} weighted edges. Final totals are unavailable until the simulation finishes.</>
+            : <>Network generated successfully. K-core filtering was applied at level k={number(meta.kCoreLevel)}. Showing {number(meta.returnedNodeCount)} of {number(meta.userCount)} users across {number(meta.returnedEdgeCount)} weighted edges.</>}
         </div>
       )}
       <div className="network-workspace">
@@ -1041,7 +1055,7 @@ function NetworkModalFrame({ titleId, onClose, onBackdrop, children }) {
         aria-labelledby={titleId}
       >
         <button className="network-modal-close" type="button" onClick={onClose} aria-label="Close details">
-          ×
+          <span aria-hidden="true">×</span>
         </button>
         {children}
       </section>
@@ -1327,7 +1341,7 @@ function ActionDonut({ values }) {
   });
 
   if (!entries.length) {
-    return <p className="muted-copy">Interaction types will appear after the first analytics snapshot.</p>;
+    return <p className="muted-copy">Interaction types will appear after the run completes.</p>;
   }
 
   return (

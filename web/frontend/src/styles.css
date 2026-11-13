@@ -203,20 +203,24 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .network-frame-legend { position: absolute; z-index: 3; top: 13px; left: 13px; display: grid; gap: 10px; padding: 9px 10px; border: 1px solid rgba(255,255,255,0.08); border-radius: 9px; background: rgba(9,16,28,0.76); backdrop-filter: blur(10px); }
 .network-frame-legend-group { display: grid; justify-items: start; gap: 3px; }
 .network-frame-legend-group > strong { margin-bottom: 2px; color: #d8e1e8; font-size: 0.68rem; font-weight: 650; }
-.network-frame-legend-group button { display: inline-flex; align-items: center; gap: 7px; min-height: 20px; padding: 2px 5px; color: #a7b4bf; border: 1px solid transparent; border-radius: 5px; background: transparent; font-size: 0.65rem; text-transform: capitalize; }
-.network-frame-legend-group button:hover { color: #eef4f1; border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.055); }
-.network-frame-legend-group button.is-active { color: #eef4f1; border-color: rgba(238,244,241,0.42); background: rgba(238,244,241,0.1); }
 .network-frame-legend-group i { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 3px; box-shadow: 0 0 8px rgba(255,255,255,0.12); }
-.network-edge-filter { display: inline-flex; align-items: center; gap: 6px; min-height: 22px; padding: 2px 5px; color: #a7b4bf; border: 1px solid transparent; border-radius: 5px; cursor: pointer; font-size: 0.65rem; text-transform: capitalize; }
-.network-edge-filter:hover { color: #eef4f1; border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.055); }
-.network-edge-filter.is-filtered { color: #667584; opacity: 0.68; }
-.network-edge-filter input { width: 12px; height: 12px; margin: 0; accent-color: var(--muted); cursor: pointer; }
-.network-edge-filter i { opacity: 0.95; }
-.network-edge-filter.is-filtered i { opacity: 0.32; }
+.network-type-filter { display: inline-flex; align-items: center; gap: 6px; min-height: 22px; padding: 2px 5px; color: #a7b4bf; border: 1px solid transparent; border-radius: 5px; cursor: pointer; font-size: 0.65rem; text-transform: capitalize; }
+.network-type-filter:hover { color: #eef4f1; border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.055); }
+.network-type-filter.is-static { cursor: default; }
+.network-type-filter.is-filtered { color: #667584; opacity: 0.68; }
+.network-type-filter input { width: 12px; height: 12px; margin: 0; accent-color: var(--muted); cursor: pointer; }
+.network-type-filter i { opacity: 0.95; }
+.network-type-filter.is-filtered i { opacity: 0.32; }
 .network-controls { position: absolute; top: 13px; right: 13px; display: grid; width: min(20rem, calc(100% - 26px)); gap: 6px; padding: 9px; border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; background: rgba(9,16,28,0.84); backdrop-filter: blur(12px); }
 .network-controls label { display: grid; grid-template-columns: minmax(6rem, auto) minmax(5.5rem, 1fr) minmax(3ch, auto); align-items: center; gap: 8px; color: #8d9aaa; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; }
 .network-controls input { width: 100%; min-width: 0; accent-color: var(--mint); }
 .network-controls output { color: var(--mint); font-variant-numeric: tabular-nums; }
+.network-display-toggles { position: absolute; z-index: 4; left: 13px; bottom: 13px; display: flex; overflow: hidden; border: 1px solid rgba(255,255,255,0.14); border-radius: 9px; background: rgba(9,16,28,0.88); box-shadow: 0 8px 24px rgba(0,0,0,0.24); backdrop-filter: blur(12px); }
+.network-display-toggles button { min-height: 32px; padding: 0 10px; color: #788896; border: 0; background: transparent; cursor: pointer; font-size: 0.62rem; font-weight: 650; letter-spacing: 0.04em; }
+.network-display-toggles button + button { border-left: 1px solid rgba(255,255,255,0.11); }
+.network-display-toggles button:hover { color: #eef4f1; background: rgba(86,180,233,0.1); }
+.network-display-toggles button.is-active { color: var(--mint); background: rgba(86,180,233,0.08); }
+.network-display-toggles button:focus-visible { position: relative; z-index: 1; color: #fff; outline: 2px solid var(--blue); outline-offset: -3px; }
 .network-zoom-controls { position: absolute; z-index: 3; right: 13px; bottom: 13px; display: grid; overflow: hidden; border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; background: rgba(9,16,28,0.88); box-shadow: 0 8px 24px rgba(0,0,0,0.24); backdrop-filter: blur(12px); }
 .network-zoom-controls button { display: grid; width: 38px; height: 38px; place-items: center; padding: 0; color: #dce9ef; border: 0; background: transparent; cursor: pointer; font: 500 1.45rem/1 system-ui, sans-serif; }
 .network-zoom-controls button + button { border-top: 1px solid rgba(255,255,255,0.11); }
@@ -225,6 +229,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .network-modal-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(3, 8, 15, 0.66); backdrop-filter: blur(5px); }
 .network-modal { position: relative; width: min(560px, 100%); max-height: min(620px, calc(100vh - 48px)); padding: 22px; overflow: auto; border: 1px solid rgba(86,180,233,0.28); border-radius: 14px; background: linear-gradient(180deg, rgba(18,30,46,0.99), rgba(9,16,28,0.99)); box-shadow: 0 24px 80px rgba(0,0,0,0.58); }
 .network-modal-close { position: absolute; top: 11px; right: 12px; display: grid; width: 30px; height: 30px; place-items: center; padding: 0; color: #aebbc6; border: 1px solid rgba(255,255,255,0.12); border-radius: 50%; background: rgba(255,255,255,0.04); cursor: pointer; font-size: 1.35rem; line-height: 1; }
+.network-modal-close > span { display: block; line-height: 1; transform: translateY(-1px); }
 .network-modal-close:hover, .network-modal-close:focus-visible { color: #fff; border-color: rgba(86,180,233,0.55); background: rgba(86,180,233,0.14); outline: none; }
 .network-inspector-header { display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.08); }
 .network-modal .network-inspector-header { padding-right: 38px; }

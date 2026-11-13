@@ -33,7 +33,6 @@ export const NETWORK_ACTION_COLORS = Object.fromEntries(
 const DEFAULT_LINK_DISTANCE = 5;
 const DEFAULT_NODE_SIZE_SCALE = 1;
 const DEFAULT_EDGE_WIDTH_SCALE = 0.24;
-const FILTERED_OUT_NODE_OPACITY = 0.22;
 const EDGE_FILTERED_NODE_OPACITY = 0.3;
 const DEFAULT_EDGE_OPACITY_SCALE = 0.3;
 // The output range caps visual size without capping degree values. Scaling the
@@ -46,6 +45,10 @@ const EDGE_WIDTH_RANGE = [1.1, 3.2];
 const CONNECTED_NETWORK_FRAME_COVERAGE = 0.85;
 const CONNECTED_NETWORK_FRAME_PADDING = 0.02;
 const CAMERA_ZOOM_FACTOR = 1.4;
+// Helios defaults to a minimum 3D camera distance of 10 / 3, which makes its
+// zoom stop while the network is still relatively far away. Keep the camera
+// above the 0.1 near clipping plane while allowing a closer inspection.
+const MIN_CAMERA_DISTANCE = 0.5;
 const EDGE_CLICK_SEARCH_DIRECTIONS = 8;
 
 function NetworkGraph({ graph, selection, onSelectionChange }) {
@@ -55,6 +58,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
   const graphRef = useRef(null);
   const nodeIndexesRef = useRef(new Map());
   const edgeIndexesRef = useRef(new Map());
+  const nodeTypesByIdRef = useRef(new Map());
   const nodesByIndexRef = useRef(new Map());
   const edgesByIndexRef = useRef(new Map());
   const hoveredEdgeIndexRef = useRef(null);
@@ -63,6 +67,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
   const linkDistanceRef = useRef(DEFAULT_LINK_DISTANCE);
   const nodeSizeScaleRef = useRef(DEFAULT_NODE_SIZE_SCALE);
   const edgeWidthScaleRef = useRef(DEFAULT_EDGE_WIDTH_SCALE);
+  const hiddenNodeTypesRef = useRef(new Set());
   const hiddenEdgeTypesRef = useRef(new Set());
   const filteredNodeIndexesRef = useRef(new Set());
   const [renderError, setRenderError] = useState("");
@@ -70,8 +75,10 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
   const [linkDistance, setLinkDistance] = useState(DEFAULT_LINK_DISTANCE);
   const [nodeSizeScale, setNodeSizeScale] = useState(DEFAULT_NODE_SIZE_SCALE);
   const [edgeWidthScale, setEdgeWidthScale] = useState(DEFAULT_EDGE_WIDTH_SCALE);
-  const [activeNodeTypes, setActiveNodeTypes] = useState([]);
+  const [hiddenNodeTypes, setHiddenNodeTypes] = useState([]);
   const [hiddenEdgeTypes, setHiddenEdgeTypes] = useState([]);
+  const [showLegend, setShowLegend] = useState(true);
+  const [showControls, setShowControls] = useState(true);
 
   latestGraphRef.current = graph;
 
@@ -90,7 +97,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
         );
         const index = Number(picked?.edge);
         const edge = edgesByIndexRef.current.get(index);
-        if (edge && !hiddenEdgeTypesRef.current.has(edge.actionType)) {
+        if (edge && edgeIsVisible(edge)) {
           return { index, edge };
         }
       }
@@ -160,11 +167,15 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
       currentEdges,
       nodeIndexesRef.current,
       edgeIndexesRef.current,
+      hiddenNodeTypesRef.current,
       hiddenEdgeTypesRef.current,
     );
     configureMeasureMappers(helios, currentNodes, currentEdges);
     nodesByIndexRef.current = itemsByNetworkIndex(currentNodes, nodeIndexesRef.current);
     edgesByIndexRef.current = itemsByNetworkIndex(currentEdges, edgeIndexesRef.current);
+    nodeTypesByIdRef.current = new Map(
+      currentNodes.map((node) => [node.id, node.userType]),
+    );
     if (currentEdges.length) {
       helios.behavior.mappers.setChannelConfig("edge", "color", {
         type: "categorical",
@@ -195,13 +206,13 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
       ),
     };
     helios._clearHighlightSource?.("dashboard:legend-hover");
-    applyLegendSelection(helios, "nodes", activeNodeTypes);
     configureVisibilityMappers(helios);
     filteredNodeIndexesRef.current = updateFilteredNodeStates(
       helios,
       currentNodes,
       currentEdges,
       nodeIndexesRef.current,
+      hiddenNodeTypesRef.current,
       hiddenEdgeTypesRef.current,
       filteredNodeIndexesRef.current,
     );
@@ -237,6 +248,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
       edgeIndexesRef.current.clear();
       nodesByIndexRef.current.clear();
       edgesByIndexRef.current.clear();
+      nodeTypesByIdRef.current.clear();
       hoveredEdgeIndexRef.current = null;
       filteredNodeIndexesRef.current.clear();
       legendIndexesRef.current = { nodes: new Map(), edges: new Map() };
@@ -251,7 +263,8 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
       if (heliosRef.current || networkRef.current) disposeGraph();
       setReady(false);
       setRenderError("");
-      setActiveNodeTypes([]);
+      setHiddenNodeTypes([]);
+      hiddenNodeTypesRef.current = new Set();
       hiddenEdgeTypesRef.current = new Set();
       filteredNodeIndexesRef.current = new Set();
       setHiddenEdgeTypes([]);
@@ -302,10 +315,14 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
           visibleEdges,
           nodeIndexesRef.current,
           edgeIndexesRef.current,
+          hiddenNodeTypesRef.current,
           hiddenEdgeTypesRef.current,
         );
         nodesByIndexRef.current = itemsByNetworkIndex(graph.nodes, nodeIndexesRef.current);
         edgesByIndexRef.current = itemsByNetworkIndex(visibleEdges, edgeIndexesRef.current);
+        nodeTypesByIdRef.current = new Map(
+          graph.nodes.map((node) => [node.id, node.userType]),
+        );
 
         if (cancelled) {
           network.dispose();
@@ -335,6 +352,9 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
           helios = null;
           network = null;
           return;
+        }
+        if (helios.renderer?.camera) {
+          helios.renderer.camera.minDistance = MIN_CAMERA_DISTANCE;
         }
 
         helios.behavior.layout.parameters({
@@ -461,7 +481,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
           }),
           helios.on(EVENTS.EDGE_CLICK, ({ detail }) => {
             const edge = edgesByIndexRef.current.get(Number(detail?.index));
-            if (edge && !hiddenEdgeTypesRef.current.has(edge.actionType)) {
+            if (edge && edgeIsVisible(edge)) {
               onSelectionChange?.({ kind: "edge", item: edge });
             } else {
               helios.getBehavior("selection")?.clearSelection();
@@ -483,7 +503,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
             if (
               detail?.state === "in"
               && edge
-              && hiddenEdgeTypesRef.current.has(edge.actionType)
+              && !edgeIsVisible(edge)
             ) {
               hoveredEdgeIndexRef.current = null;
               helios.getBehavior("hover")?.clearEdgeHover({ silent: true, force: true });
@@ -497,7 +517,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
             if (detail?.kind !== "node" && detail?.kind !== "edge") {
               const hoveredIndex = hoveredEdgeIndexRef.current;
               const hoveredEdge = edgesByIndexRef.current.get(hoveredIndex);
-              const nearby = hoveredEdge && !hiddenEdgeTypesRef.current.has(hoveredEdge.actionType)
+              const nearby = hoveredEdge && edgeIsVisible(hoveredEdge)
                 ? { index: hoveredIndex, edge: hoveredEdge }
                 : await findNearbyVisibleEdge(helios, Number(detail?.x), Number(detail?.y));
               if (nearby && heliosRef.current === helios) {
@@ -613,25 +633,23 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
     heliosRef.current?._clearHighlightSource?.("dashboard:legend-hover");
   }
 
-  function toggleNodeLegendCategory(type, additive) {
-    const active = activeNodeTypes;
-    const next = additive
-      ? active.includes(type)
-        ? active.filter((entry) => entry !== type)
-        : [...active, type]
-      : active.length === 1 && active[0] === type
-        ? []
-        : [type];
-    setActiveNodeTypes(next);
+  function edgeIsVisible(edge) {
+    return Boolean(
+      edge
+      && !hiddenEdgeTypesRef.current.has(edge.actionType)
+      && !hiddenNodeTypesRef.current.has(nodeTypesByIdRef.current.get(edge.source))
+      && !hiddenNodeTypesRef.current.has(nodeTypesByIdRef.current.get(edge.target)),
+    );
+  }
 
-    const helios = heliosRef.current;
-    helios?._clearHighlightSource?.("dashboard:legend-hover");
-    helios?.getBehavior("hover")?.update({
-      otherHighlightNodeStyle: unhighlightedNodeStyle(
-        next.length ? FILTERED_OUT_NODE_OPACITY : 1,
-      ),
-    });
-    applyLegendSelection(helios, "nodes", next);
+  function toggleNodeType(type) {
+    const next = hiddenNodeTypes.includes(type)
+      ? hiddenNodeTypes.filter((entry) => entry !== type)
+      : [...hiddenNodeTypes, type];
+    const hiddenTypes = new Set(next);
+    hiddenNodeTypesRef.current = hiddenTypes;
+    setHiddenNodeTypes(next);
+    applyNetworkFilters(hiddenTypes, hiddenEdgeTypesRef.current);
   }
 
   function toggleEdgeType(type) {
@@ -641,13 +659,14 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
     const hiddenTypes = new Set(next);
     hiddenEdgeTypesRef.current = hiddenTypes;
     setHiddenEdgeTypes(next);
+    applyNetworkFilters(hiddenNodeTypesRef.current, hiddenTypes);
+  }
 
+  function applyNetworkFilters(hiddenUserTypes, hiddenActionTypes) {
     const helios = heliosRef.current;
     const network = networkRef.current;
     const currentGraph = graphRef.current;
     helios?._clearHighlightSource?.("dashboard:legend-hover");
-    setActiveNodeTypes([]);
-    applyLegendSelection(helios, "nodes", []);
     helios?.getBehavior("hover")?.update({
       otherHighlightNodeStyle: unhighlightedNodeStyle(1),
     });
@@ -659,9 +678,12 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
     if (!helios || !network || !currentGraph) return;
     writeFilterAttributes(
       network,
+      currentGraph.nodes,
       currentGraph.edges,
+      nodeIndexesRef.current,
       edgeIndexesRef.current,
-      hiddenTypes,
+      hiddenUserTypes,
+      hiddenActionTypes,
     );
     configureVisibilityMappers(helios);
     filteredNodeIndexesRef.current = updateFilteredNodeStates(
@@ -669,28 +691,19 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
       currentGraph.nodes,
       currentGraph.edges,
       nodeIndexesRef.current,
-      hiddenTypes,
+      hiddenUserTypes,
+      hiddenActionTypes,
       filteredNodeIndexesRef.current,
     );
   }
 
-  function applyLegendSelection(helios, kind, types) {
-    const isNode = kind === "nodes";
-    const source = isNode
-      ? "dashboard:node-legend-click"
-      : "dashboard:edge-legend-click";
-    const ids = types.flatMap(
-      (entry) => legendIndexesRef.current[kind]?.get(entry) || [],
-    );
-    if (ids.length) {
-      helios?._setHighlightSource?.(source, isNode ? { nodes: ids } : { edges: ids });
-    } else {
-      helios?._clearHighlightSource?.(source);
-    }
-  }
-
   const userTypes = [...new Set(graph.nodes.map((node) => node.userType))];
   const actionTypes = [...new Set(graph.edges.map((edge) => edge.actionType))];
+
+  function toggleLegend() {
+    if (showLegend) clearLegendHover();
+    setShowLegend((current) => !current);
+  }
 
   return (
     <div className="network-stage">
@@ -699,19 +712,20 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
       {renderError && <div className="network-overlay network-error">{renderError}</div>}
       {ready && (
         <>
-          <div className="network-frame-legend">
-            <LegendGroup
+          {showLegend && <div id="network-frame-legend" className="network-frame-legend">
+            <FilterGroup
               title="User type"
               types={userTypes}
               colors={NETWORK_USER_COLORS}
               fallback="#56b4e9"
-              activeTypes={activeNodeTypes}
+              hiddenTypes={hiddenNodeTypes}
               onEnter={(type) => highlightLegendCategory("nodes", type)}
               onLeave={clearLegendHover}
-              onToggle={toggleNodeLegendCategory}
+              onToggle={toggleNodeType}
+              toggleable={userTypes.length > 1}
               formatLabel={(type) => type === "bad" ? "bad actor" : type}
             />
-            <EdgeFilterGroup
+            <FilterGroup
               title="Interaction type"
               types={actionTypes}
               colors={NETWORK_ACTION_COLORS}
@@ -721,8 +735,8 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
               onLeave={clearLegendHover}
               onToggle={toggleEdgeType}
             />
-          </div>
-          <div className="network-controls">
+          </div>}
+          {showControls && <div id="network-parameter-controls" className="network-controls">
             <label>
               <span>Link distance</span>
               <input
@@ -759,6 +773,28 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
               />
               <output>{edgeWidthScale.toFixed(2)}</output>
             </label>
+          </div>}
+          <div className="network-display-toggles" aria-label="Network display options">
+            <button
+              type="button"
+              className={showLegend ? "is-active" : ""}
+              aria-pressed={showLegend}
+              aria-controls="network-frame-legend"
+              title={showLegend ? "Hide legend" : "Show legend"}
+              onClick={toggleLegend}
+            >
+              Legend
+            </button>
+            <button
+              type="button"
+              className={showControls ? "is-active" : ""}
+              aria-pressed={showControls}
+              aria-controls="network-parameter-controls"
+              title={showControls ? "Hide controls" : "Show controls"}
+              onClick={() => setShowControls((current) => !current)}
+            >
+              Controls
+            </button>
           </div>
           <div className="network-zoom-controls" aria-label="Network zoom controls">
             <button
@@ -795,46 +831,7 @@ function connectedNodeIndexes(edges, nodeIndexes) {
   return [...connected];
 }
 
-function LegendGroup({
-  title,
-  types,
-  colors,
-  fallback,
-  activeTypes,
-  onEnter,
-  onLeave,
-  onToggle,
-  formatLabel = (type) => type,
-}) {
-  return (
-    <div className="network-frame-legend-group">
-      <strong>{title}</strong>
-      {types.map((type) => (
-        <button
-          type="button"
-          key={type}
-          className={activeTypes.includes(type) ? "is-active" : ""}
-          aria-pressed={activeTypes.includes(type)}
-          title="Click to highlight this type; Shift-click to combine types"
-          onPointerDown={(event) => event.stopPropagation()}
-          onPointerUp={(event) => event.stopPropagation()}
-          onWheel={(event) => event.stopPropagation()}
-          onPointerEnter={() => onEnter(type)}
-          onPointerLeave={onLeave}
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggle(type, event.shiftKey);
-          }}
-        >
-          <i style={{ background: colors[type] || fallback }} />
-          <span>{formatLabel(type)}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function EdgeFilterGroup({
+function FilterGroup({
   title,
   types,
   colors,
@@ -843,6 +840,8 @@ function EdgeFilterGroup({
   onEnter,
   onLeave,
   onToggle,
+  toggleable = true,
+  formatLabel = (type) => type,
 }) {
   return (
     <div className="network-frame-legend-group">
@@ -850,11 +849,25 @@ function EdgeFilterGroup({
       {types.map((type) => {
         const visible = !hiddenTypes.includes(type);
         const color = colors[type] || fallback;
+        const label = formatLabel(type);
+        if (!toggleable) {
+          return (
+            <div
+              key={type}
+              className="network-type-filter is-static"
+              onPointerEnter={() => onEnter(type)}
+              onPointerLeave={onLeave}
+            >
+              <i style={{ background: color }} />
+              <span>{label}</span>
+            </div>
+          );
+        }
         return (
           <label
             key={type}
-            className={`network-edge-filter${visible ? "" : " is-filtered"}`}
-            title={visible ? "Uncheck to hide this interaction type" : "Check to show this interaction type"}
+            className={`network-type-filter${visible ? "" : " is-filtered"}`}
+            title={visible ? `Uncheck to filter ${label}` : `Check to show ${label}`}
             onPointerDown={(event) => event.stopPropagation()}
             onPointerUp={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
@@ -868,7 +881,7 @@ function EdgeFilterGroup({
               onClick={(event) => event.stopPropagation()}
             />
             <i style={{ background: color }} />
-            <span>{type}</span>
+            <span>{label}</span>
           </label>
         );
       })}
@@ -895,6 +908,7 @@ function writeGraphAttributes(
   edges,
   nodeIndexes,
   edgeIndexes,
+  hiddenNodeTypes = new Set(),
   hiddenEdgeTypes = new Set(),
 ) {
   const nodesByIndex = itemsByNetworkIndex(nodes, nodeIndexes);
@@ -923,8 +937,11 @@ function writeGraphAttributes(
   );
   writeFilterAttributes(
     network,
+    nodes,
     edges,
+    nodeIndexes,
     edgeIndexes,
+    hiddenNodeTypes,
     hiddenEdgeTypes,
   );
 
@@ -989,18 +1006,32 @@ function configureMeasureMappers(helios, nodes, edges) {
 
 function writeFilterAttributes(
   network,
+  nodes,
   edges,
+  nodeIndexes,
   edgeIndexes,
+  hiddenNodeTypes,
   hiddenEdgeTypes,
 ) {
+  const hiddenUsers = hiddenNodeTypes instanceof Set
+    ? hiddenNodeTypes
+    : new Set(hiddenNodeTypes || []);
   const hiddenTypes = hiddenEdgeTypes instanceof Set
     ? hiddenEdgeTypes
     : new Set(hiddenEdgeTypes || []);
+  const nodesByIndex = itemsByNetworkIndex(nodes, nodeIndexes);
+  const nodeTypesById = new Map(
+    [...nodesByIndex.values()].map((node) => [node.id, node.userType]),
+  );
   const edgesByIndex = itemsByNetworkIndex(edges, edgeIndexes);
   if (!edges.length) return;
   network.edgeAttribute("filterOpacity", (current, index) => {
     const edge = edgesByIndex.get(index);
-    return edge && hiddenTypes.has(edge.actionType) ? 0 : 1;
+    return edge && (
+      hiddenTypes.has(edge.actionType)
+      || hiddenUsers.has(nodeTypesById.get(edge.source))
+      || hiddenUsers.has(nodeTypesById.get(edge.target))
+    ) ? 0 : 1;
   });
 }
 
@@ -1026,26 +1057,45 @@ function updateFilteredNodeStates(
   nodes,
   edges,
   nodeIndexes,
+  hiddenNodeTypes,
   hiddenEdgeTypes,
   previousFilteredIndexes = new Set(),
 ) {
+  const hiddenUsers = hiddenNodeTypes instanceof Set
+    ? hiddenNodeTypes
+    : new Set(hiddenNodeTypes || []);
   const hiddenTypes = hiddenEdgeTypes instanceof Set
     ? hiddenEdgeTypes
     : new Set(hiddenEdgeTypes || []);
   const nextFilteredIndexes = new Set();
+  const nodeTypesById = new Map(nodes.map((node) => [node.id, node.userType]));
 
+  for (const node of nodes) {
+    if (!hiddenUsers.has(node.userType)) continue;
+    const index = Number(nodeIndexes.get(node.id));
+    if (Number.isInteger(index) && index >= 0) nextFilteredIndexes.add(index);
+  }
+
+  // Edge filtering also de-emphasizes nodes whose only connections are hidden.
+  // User filtering is different: every node of a checked user type should stay
+  // fully visible, even when all of its neighbors belong to a hidden type.
   if (hiddenTypes.size) {
     const connectedNodeIds = new Set();
     const visiblyConnectedNodeIds = new Set();
     for (const edge of edges) {
       connectedNodeIds.add(edge.source);
       connectedNodeIds.add(edge.target);
-      if (!hiddenTypes.has(edge.actionType)) {
+      if (
+        !hiddenTypes.has(edge.actionType)
+        && !hiddenUsers.has(nodeTypesById.get(edge.source))
+        && !hiddenUsers.has(nodeTypesById.get(edge.target))
+      ) {
         visiblyConnectedNodeIds.add(edge.source);
         visiblyConnectedNodeIds.add(edge.target);
       }
     }
     for (const node of nodes) {
+      if (hiddenUsers.has(node.userType)) continue;
       if (connectedNodeIds.has(node.id) && !visiblyConnectedNodeIds.has(node.id)) {
         const index = Number(nodeIndexes.get(node.id));
         if (Number.isInteger(index) && index >= 0) nextFilteredIndexes.add(index);
