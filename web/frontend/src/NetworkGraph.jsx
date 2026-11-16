@@ -181,6 +181,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
             [0, 0, 0],
           );
           const divisor = Math.max(1, neighbors.length);
+          // 2.399... is the golden angle (137.5) in radians used for node seed placement
           const angle = Number(createdIndexes[addedIndex]) * 2.399963229728653;
           const offset = Number(createdIndexes[addedIndex]) * 3;
           positions[offset] = (center[0] / divisor) + (Math.cos(angle) * NEW_NODE_SEED_JITTER);
