@@ -20,6 +20,8 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: #090e1a; }
 button, input { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
+select, input[type="checkbox"], input[type="radio"], input[type="range"] { cursor: pointer; }
+select:disabled, input:disabled { cursor: not-allowed; }
 
 .app-shell { position: relative; min-height: 100vh; overflow: hidden; padding: 0 max(24px, calc((100vw - 1240px) / 2)); }
 .ambient { position: absolute; border-radius: 50%; filter: blur(1px); pointer-events: none; opacity: 0.7; }
@@ -115,6 +117,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .toggle-row small { color: #6f7d8b; font-size: 0.68rem; line-height: 1.35; }
 .toggle-row input, .toggle-row i { grid-column: 2; grid-row: 1; width: 42px; height: 24px; margin: 0; }
 .toggle-row input { z-index: 2; opacity: 0; cursor: pointer; }
+.toggle-row:has(input:disabled), .toggle-row input:disabled { cursor: not-allowed; }
 .toggle-row i { position: relative; border-radius: 20px; background: #263241; pointer-events: none; transition: background 150ms ease; }
 .toggle-row i::after { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; border-radius: 50%; background: #778593; transition: transform 150ms ease, background 150ms ease; }
 .toggle-row input:checked + i { background: rgba(86,180,233,0.25); }
@@ -197,7 +200,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .network-workspace { min-width: 0; }
 .network-stage { position: relative; height: clamp(430px, 54vw, 680px); overflow: hidden; border: 1px solid rgba(86,180,233,0.12); border-radius: 13px; background: #09101c; }
 .helios-container { position: absolute; inset: 0; }
-.helios-container canvas { display: block; width: 100% !important; height: 100% !important; }
+.helios-container canvas { display: block; width: 100% !important; height: 100% !important; cursor: grab; }
 .network-overlay { position: absolute; inset: 0; display: grid; place-items: center; padding: 30px; color: #7f8d9b; background: radial-gradient(circle, rgba(20,34,48,0.75), rgba(9,16,28,0.96)); font-size: 0.82rem; text-align: center; }
 .network-error { color: #ff9cb2; }
 .network-frame-legend { position: absolute; z-index: 3; top: 13px; left: 13px; display: grid; gap: 10px; padding: 9px 10px; border: 1px solid rgba(255,255,255,0.08); border-radius: 9px; background: rgba(9,16,28,0.76); backdrop-filter: blur(10px); }

@@ -42,9 +42,10 @@ const DEFAULT_EDGE_OPACITY_SCALE = 0.3;
 // degrees; the bounded diameter range keeps hubs distinct without crowding.
 const NODE_SIZE_RANGE = [0.5, 10];
 const EDGE_WIDTH_RANGE = [1.1, 3.2];
-const CONNECTED_NETWORK_FRAME_COVERAGE = 0.85;
-const CONNECTED_NETWORK_FRAME_PADDING = 0.02;
+const CONNECTED_NETWORK_FRAME_COVERAGE = 0.95;
+const CONNECTED_NETWORK_FRAME_PADDING = 0.05;
 const CAMERA_ZOOM_FACTOR = 1.4;
+const NEW_NODE_SEED_JITTER = 0.5;
 // Helios defaults to a minimum 3D camera distance of 10 / 3, which makes its
 // zoom stop while the network is still relatively far away. Keep the camera
 // above the 0.1 near clipping plane while allowing a closer inspection.
@@ -61,6 +62,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
   const nodeTypesByIdRef = useRef(new Map());
   const nodesByIndexRef = useRef(new Map());
   const edgesByIndexRef = useRef(new Map());
+  const hoveredNodeIndexRef = useRef(null);
   const hoveredEdgeIndexRef = useRef(null);
   const latestGraphRef = useRef(graph);
   const legendIndexesRef = useRef({ nodes: new Map(), edges: new Map() });
@@ -81,6 +83,19 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
   const [showControls, setShowControls] = useState(true);
 
   latestGraphRef.current = graph;
+
+  function setGraphCursor(cursor) {
+    const canvas = containerRef.current?.querySelector("canvas");
+    if (canvas) canvas.style.cursor = cursor;
+  }
+
+  function restoreGraphCursor() {
+    setGraphCursor(
+      hoveredNodeIndexRef.current !== null || hoveredEdgeIndexRef.current !== null
+        ? "pointer"
+        : "grab",
+    );
+  }
 
   async function findNearbyVisibleEdge(helios, x, y) {
     // Helios exposes only single-pixel edge picking. Reuse its already-rendered
@@ -111,7 +126,9 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
     helios?.getBehavior("selection")?.clearSelection();
     helios?.getBehavior("hover")?.clearNodeHover({ silent: true, force: true });
     helios?.getBehavior("hover")?.clearEdgeHover({ silent: true, force: true });
+    hoveredNodeIndexRef.current = null;
     hoveredEdgeIndexRef.current = null;
+    restoreGraphCursor();
   }, [selection]);
 
   function updateExistingGraph(nextGraph) {
@@ -136,8 +153,42 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
     const addedNodes = nextNodes.filter((node) => !nodeIndexesRef.current.has(node.id));
     if (addedNodes.length) {
       // Use Helios' public mutators so its visual attribute buffers are
-      // initialized before the renderer sees the new topology.
-      const indexes = helios.addNodes(addedNodes.length);
+      // initialized before the renderer sees the new topology. Seed each new
+      // node near an existing neighbor so refreshes do not make nodes fly in
+      // from the edge of the layout.
+      const addedNodeIds = new Set(addedNodes.map((node) => node.id));
+      const neighborIndexes = new Map(addedNodes.map((node) => [node.id, []]));
+      for (const edge of nextEdges) {
+        if (addedNodeIds.has(edge.source) && nodeIndexesRef.current.has(edge.target)) {
+          neighborIndexes.get(edge.source).push(nodeIndexesRef.current.get(edge.target));
+        }
+        if (addedNodeIds.has(edge.target) && nodeIndexesRef.current.has(edge.source)) {
+          neighborIndexes.get(edge.target).push(nodeIndexesRef.current.get(edge.source));
+        }
+      }
+      const indexes = helios.addNodes(addedNodes.length, (createdIndexes, visuals) => {
+        const positions = visuals.nodePositions;
+        addedNodes.forEach((node, addedIndex) => {
+          const neighbors = neighborIndexes.get(node.id) || [];
+          const center = neighbors.reduce(
+            (sum, neighborIndex) => {
+              const offset = Number(neighborIndex) * 3;
+              sum[0] += positions[offset] || 0;
+              sum[1] += positions[offset + 1] || 0;
+              sum[2] += positions[offset + 2] || 0;
+              return sum;
+            },
+            [0, 0, 0],
+          );
+          const divisor = Math.max(1, neighbors.length);
+          // 2.399... is the golden angle (137.5) in radians used for node seed placement
+          const angle = Number(createdIndexes[addedIndex]) * 2.399963229728653;
+          const offset = Number(createdIndexes[addedIndex]) * 3;
+          positions[offset] = (center[0] / divisor) + (Math.cos(angle) * NEW_NODE_SEED_JITTER);
+          positions[offset + 1] = (center[1] / divisor) + (Math.sin(angle) * NEW_NODE_SEED_JITTER);
+          positions[offset + 2] = center[2] / divisor;
+        });
+      });
       addedNodes.forEach((node, index) => nodeIndexesRef.current.set(node.id, Number(indexes[index])));
     }
 
@@ -216,7 +267,20 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
       hiddenEdgeTypesRef.current,
       filteredNodeIndexesRef.current,
     );
-    helios.behavior.layout.reheat("dashboard-network-update");
+    // addNodes already requests a layout reheat. Only request one here when
+    // an update added edges between nodes that were already present.
+    if (!addedNodes.length && addedEdges.length) {
+      helios.behavior.layout.reheat("dashboard-network-update");
+    }
+    // Keep tracking the connected network's center without changing camera
+    // distance. Manual camera interaction disables Helios' follow mode, so do
+    // not turn it back on during a later refresh if the user moved the view.
+    if (helios.cameraControls?.().followTarget === true) {
+      helios.cameraFollowNodes(
+        connectedNodeIndexes(currentEdges, nodeIndexesRef.current),
+        { animate: true, durationMs: 400, zoomScale: 1 },
+      );
+    }
     return true;
   }
 
@@ -249,6 +313,7 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
       nodesByIndexRef.current.clear();
       edgesByIndexRef.current.clear();
       nodeTypesByIdRef.current.clear();
+      hoveredNodeIndexRef.current = null;
       hoveredEdgeIndexRef.current = null;
       filteredNodeIndexesRef.current.clear();
       legendIndexesRef.current = { nodes: new Map(), edges: new Map() };
@@ -336,6 +401,9 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
           ui: false,
           quickControls: false,
           legends: { enabled: false },
+          // The graph is framed explicitly after initial layout. Automatic
+          // fitting on every data mutation makes refreshes look like zooms.
+          camera: { autoFit: false, largeNetworkStartupFit: false },
           transparencyModeEdges: "alpha",
           clearColor: "#09101c",
           // Helios promotes selected/highlighted items in its render buffers by
@@ -468,6 +536,24 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
         };
         helios.enableNodePicking(pickingOptions);
         helios.enableEdgePicking(pickingOptions);
+        const graphCanvas = container.querySelector("canvas");
+        if (graphCanvas) {
+          const handlePointerDown = () => {
+            if (hoveredNodeIndexRef.current === null && hoveredEdgeIndexRef.current === null) {
+              setGraphCursor("grabbing");
+            }
+          };
+          const handlePointerEnd = () => restoreGraphCursor();
+          graphCanvas.addEventListener("pointerdown", handlePointerDown);
+          graphCanvas.addEventListener("pointerup", handlePointerEnd);
+          graphCanvas.addEventListener("pointercancel", handlePointerEnd);
+          graphCanvas.style.cursor = "grab";
+          eventUnsubscribers.push(() => {
+            graphCanvas.removeEventListener("pointerdown", handlePointerDown);
+            graphCanvas.removeEventListener("pointerup", handlePointerEnd);
+            graphCanvas.removeEventListener("pointercancel", handlePointerEnd);
+          });
+        }
         eventUnsubscribers.push(
           helios.on(EVENTS.NODE_CLICK, ({ detail }) => {
             const index = Number(detail?.index);
@@ -489,12 +575,22 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
             }
           }),
           helios.on(EVENTS.NODE_HOVER, ({ detail }) => {
-            if (detail?.state === "in") hoveredEdgeIndexRef.current = null;
+            const index = Number(detail?.index);
+            if (detail?.state === "in") {
+              hoveredEdgeIndexRef.current = null;
+              hoveredNodeIndexRef.current = index;
+              setGraphCursor("pointer");
+            } else if (detail?.state === "out" && hoveredNodeIndexRef.current === index) {
+              hoveredNodeIndexRef.current = null;
+              restoreGraphCursor();
+            }
             if (
               detail?.state === "in"
-              && filteredNodeIndexesRef.current.has(Number(detail.index))
+              && filteredNodeIndexesRef.current.has(index)
             ) {
+              hoveredNodeIndexRef.current = null;
               helios.getBehavior("hover")?.clearNodeHover({ silent: true, force: true });
+              restoreGraphCursor();
             }
           }),
           helios.on(EVENTS.EDGE_HOVER, ({ detail }) => {
@@ -507,10 +603,14 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
             ) {
               hoveredEdgeIndexRef.current = null;
               helios.getBehavior("hover")?.clearEdgeHover({ silent: true, force: true });
+              restoreGraphCursor();
             } else if (detail?.state === "in" && edge) {
+              hoveredNodeIndexRef.current = null;
               hoveredEdgeIndexRef.current = index;
+              setGraphCursor("pointer");
             } else if (detail?.state === "out" && hoveredEdgeIndexRef.current === index) {
               hoveredEdgeIndexRef.current = null;
+              restoreGraphCursor();
             }
           }),
           helios.on(EVENTS.GRAPH_CLICK, async ({ detail }) => {
@@ -549,6 +649,14 @@ function NetworkGraph({ graph, selection, onSelectionChange }) {
             }
           : {};
         helios.frameNetwork({ ...connectedFrameOptions, animate: false });
+        if (connectedFrameNodeIndexes.length) {
+          // Follow the layout centroid while it settles, but retain the
+          // distance selected by frameNetwork so refreshes cannot zoom.
+          helios.cameraFollowNodes(
+            connectedFrameNodeIndexes,
+            { animate: true, durationMs: 400, zoomScale: 1 },
+          );
+        }
         frameTimer = window.setTimeout(
           () => {
             if (heliosRef.current === helios) {
